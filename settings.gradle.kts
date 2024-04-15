@@ -1,5 +1,21 @@
+/**
+ *      This file is part of "Have I been pwned - importer".
+ *
+ *     "Have I been pwned - importer" is free software: you can redistribute
+ *     it and/or modify it under the terms of the GNU General Public License
+ *     as published by the Free  Software Foundation, either version 3 of the
+ *     License, or (at your option) any later version.
+ *
+ *     "Have I been pwned - importer" is distributed in the hope that it will
+ *     be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
+ *     of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ *     General Public License for more details.
+ *
+ *     You should have received a copy of the GNU General Public License along
+ *     with "Have I been pwned - importer". If not, see <https://www.gnu.org/licenses/>.
+ */
 plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "0.5.0"
 }
-rootProject.name = "import-pwnd-to-db"
+rootProject.name = "Have I been pwned - importer"
 
