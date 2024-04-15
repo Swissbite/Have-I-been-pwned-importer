@@ -1,5 +1,9 @@
 # Have I been pwned - importer
 
+A simple importer of all pwned hashes into mongodb.
+
+A personal study of how to import that amount of files as fast and as usable as possible.
+
 ## Why this tool exists
 
 I was curious about the data of the [Have I Been Pwned](https://haveibeenpwned.com/) and wanted to analyze them.
@@ -25,7 +29,5 @@ And: I wanted to try the `Channel` API of `kotlinx.coroutines`.
 | Variable                    | Default Value                               | Description                                             |
 |:----------------------------|:--------------------------------------------|:--------------------------------------------------------|
 | `MONGODB_CONNECTION_URL`    | `mongodb://admin:admin1234@localhost:27017` | Full qualified connection string                        |
+| `MONGODB_DATABASE`          | `pwnd`                                      | Database to connect.                                    |
 | `PWNED_PASSWORDS_DIRECTORY` |                                             | Full qualified path to all files of `Have I Been Pwned` |
-
-
-

@@ -41,9 +41,10 @@ import kotlin.system.exitProcess
 
 private val mongodbConnectionURL = System.getenv("MONGODB_CONNECTION_URL") ?: "mongodb://admin:admin1234@localhost:27017"
 private val path = System.getenv("PWNED_PASSWORDS_DIRECTORY")
+private val database = System.getenv("MONGODB_DATABASE") ?: "pwnd"
 private val mongoClient: MongoClient = MongoClient.create(mongodbConnectionURL)
 
-private val mongoDB = mongoClient.getDatabase("pwnd")
+private val mongoDB = mongoClient.getDatabase(database)
 private val hashCollection: MongoCollection<HashWithOccurrence> = mongoDB.getCollection<HashWithOccurrence>("hashes")
 
 private val systemProcesses = Runtime.getRuntime().availableProcessors()
