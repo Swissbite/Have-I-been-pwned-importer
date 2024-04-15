@@ -1,5 +1,7 @@
 plugins {
     kotlin("jvm") version "1.9.23"
+    application
+    id("com.github.johnrengelman.shadow") version "8.1.1"
 }
 
 group = "org.example"
@@ -8,7 +10,9 @@ version = "1.0-SNAPSHOT"
 repositories {
     mavenCentral()
 }
-
+application {
+    mainClass = "net.daester.david.pwned.MainKt"
+}
 dependencies {
     testImplementation(kotlin("test"))
     implementation("org.mongodb:mongodb-driver-kotlin-coroutine:5.0.1")

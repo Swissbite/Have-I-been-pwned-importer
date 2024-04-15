@@ -161,6 +161,8 @@ fun main() {
 
 private fun CoroutineScope.getAllFilePaths(path: Path): ReceiveChannel<Path> =  produce(
     capacity = systemProcesses) {
+
+    logger.info { "Path: ${path.toAbsolutePath()}" }
     val files = path.toFile().walk().maxDepth(1).asStream().parallel().filter { it.isFile }.map { it.toPath() }.iterator()
     while (files.hasNext()) {
         send(files.next())
