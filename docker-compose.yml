@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  mdb:
+    container_name: mongodb
+    image: mongo:latest
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - ./mdbData:/data/db
+    environment:
+      # NOTE: MONGODB/USER/PASSWORD should match values in app container
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin1234
