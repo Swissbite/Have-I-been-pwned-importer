@@ -29,14 +29,13 @@ import com.mongodb.kotlin.client.coroutine.MongoCollection
 import com.mongodb.kotlin.client.coroutine.MongoDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.produce
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import mu.KLogger
 import mu.KotlinLogging
-import net.daester.david.pwned.*
+import net.daester.david.pwned.Status
 import org.bson.BsonDocument
 import org.bson.BsonElement
 import org.bson.BsonInt32
@@ -52,17 +51,15 @@ class ImportByRecord (private val status: Status, database: MongoDatabase, hashe
     init {
         logger.info { "Setup import by record. database:${database.name}, collection:$hashesCollectionName, systemProcesses:$systemProcesses" }
     }
-    fun processHashFiles(fileChannel: ReceiveChannel<Path>, scope: CoroutineScope): Job =
-        scope.launch {
-
-
+    suspend fun processHashFiles(fileChannel: ReceiveChannel<Path>, scope: CoroutineScope)
+        {
             hashCollection.createIndexes(listOf(prefixIndex, occurrenceIndex)).collect()
-            val dataToProcess = extractFileContent(fileChannel)
-            val entriesToUpsert = calculateNeededUpsertDataObjects(dataToProcess,
+            val dataToProcess = scope.extractFileContent(fileChannel)
+            val entriesToUpsert = scope.calculateNeededUpsertDataObjects(dataToProcess,
                 hashCollection
             )
             repeat(maxCoroutineFn) {
-                upsertHashes(entriesToUpsert, hashCollection)
+                scope.upsertHashes(entriesToUpsert, hashCollection)
             }
         }
     private fun CoroutineScope.extractFileContent(fileChannel: ReceiveChannel<Path>): ReceiveChannel<Pair<Prefix, Map<Hash, Int>>> =  produce(
@@ -75,7 +72,7 @@ class ImportByRecord (private val status: Status, database: MongoDatabase, hashe
                 val (suffix, amount) = line.split(":")
                 "$prefix$suffix" to amount.toInt(10)
             })
-            status.increaseReadFiles()
+            status.increaseFilesRead()
             logger.trace {"END: extractFileContent for ${path.fileName}" }
         }
     }
@@ -106,9 +103,9 @@ class ImportByRecord (private val status: Status, database: MongoDatabase, hashe
             if (toDelete.isNotEmpty() || toUpdate.isNotEmpty() || toInsert.isNotEmpty()) {
                 send(ChangeObject(toDelete = toDelete.toList(), toInsert = toInsert.toList(), toUpdate = toUpdate.toList()))
             }
-            status.increaseObjects(data.size)
+            status.increaseTotalHashes(data.size)
 
-            status.increaseValidated(data.size - toDelete.size - toUpdate.size - toInsert.size)
+            status.increaseValidatedHashes(data.size - toDelete.size - toUpdate.size - toInsert.size)
             logger.trace { "END: calculate upsert for prefix $prefix" }
         }
     }
@@ -125,12 +122,26 @@ class ImportByRecord (private val status: Status, database: MongoDatabase, hashe
                 toDelete + toInsert + toUpdate,
                 BulkWriteOptions().ordered(false)
             )
-            status.increaseDeleted(toDelete.size)
-            status.increaseInserted(toInsert.size)
-            status.increaseUpdated(toUpdate.size)
+            status.increaseDeletedHashes(toDelete.size)
+            status.increaseInsertedHashes(toInsert.size)
+            status.increaseUpdatedHashes(toUpdate.size)
         }
     }
 }
 
+typealias Prefix = String
+typealias Hash = String
 
 
+data class HashWithOccurrence(
+    val hash: Hash,
+    val prefix: Prefix,
+    val occurrence: Int,
+    val lastUpdate: LocalDateTime? = LocalDateTime.now()
+)
+
+data class ChangeObject(
+    val toInsert: List<HashWithOccurrence>,
+    val toUpdate: List<HashWithOccurrence>,
+    val toDelete: List<HashWithOccurrence>
+)

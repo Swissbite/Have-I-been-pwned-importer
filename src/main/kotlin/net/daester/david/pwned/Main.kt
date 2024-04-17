@@ -26,11 +26,11 @@ import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.produce
 import mu.KLogger
 import mu.KotlinLogging
+import net.daester.david.pwned.importer.by_prefix.ImportByPrefix
 import net.daester.david.pwned.importer.by_record.ImportByRecord
 import java.nio.file.Path
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
-import java.time.LocalDateTime
 import java.util.*
 import kotlin.streams.asStream
 import kotlin.system.exitProcess
@@ -47,84 +47,82 @@ private val systemProcesses = Runtime.getRuntime().availableProcessors()
 
 private val logger: KLogger = KotlinLogging.logger {  }
 
-typealias Prefix = String
-typealias Hash = String
 
-data class HashWithOccurrence(
-    val hash: Hash,
-    val prefix: Prefix,
-    val occurrence: Int,
-    val lastUpdate: LocalDateTime? = LocalDateTime.now()
-)
-
-data class ChangeObject(
-    val toInsert: List<HashWithOccurrence>,
-    val toUpdate: List<HashWithOccurrence>,
-    val toDelete: List<HashWithOccurrence>
-)
 interface Status {
-    fun increaseQueued()
-    fun increaseReadFiles()
-    fun increaseValidated(increaseBy: Int = 1)
-    fun increaseInserted(increaseBy: Int = 1)
-    fun increaseDeleted(increaseBy: Int = 1)
-    fun increaseObjects(increaseBy: Int = 1)
-    fun increaseUpdated(increaseBy: Int = 1)
+    fun increaseFilesQueued()
+    fun increaseFilesRead()
+    fun increaseValidatedHashes(increaseBy: Int = 1)
+    fun increaseInsertedHashes(increaseBy: Int = 1)
+    fun increaseDeletedHashes(increaseBy: Int = 1)
+    fun increaseTotalHashes(increaseBy: Int = 1)
+    fun increaseUpdatedHashes(increaseBy: Int = 1)
 }
 
 private object StatusObject: Status {
-    var fileQueued: Int = 0
+    var filesQueued: Int = 0
         private set
     var filesRead: Int = 0
         private set
 
-    var objectCounter: Int = 0
+    var totalHashesCounter: Int = 0
         private set
-    var validatedCounter: Int = 0
+    var validatedHashesCounter: Int = 0
         private set
-    var updatedCounter: Int = 0
+    var updatedHashesCounter: Int = 0
         private set
-    var insertedCounter: Int = 0
+    var insertedHashesCounter: Int = 0
         private set
-    var deletedCounter: Int = 0
+    var deletedHashesCounter: Int = 0
         private set
-    override fun increaseQueued() {
+    override fun increaseFilesQueued() {
         synchronized(this) {
-            ++fileQueued
+            ++filesQueued
         }
     }
-    override fun increaseReadFiles() {
+    override fun increaseFilesRead() {
         synchronized(this) {
             ++filesRead
         }
     }
 
-    override fun increaseValidated(increaseBy: Int) {
+    override fun increaseValidatedHashes(increaseBy: Int) {
         synchronized(this) {
-            validatedCounter += increaseBy
+            validatedHashesCounter += increaseBy
         }
     }
 
-    override fun increaseUpdated(increaseBy: Int) {
+    override fun increaseUpdatedHashes(increaseBy: Int) {
         synchronized(this) {
-            updatedCounter += increaseBy
+            updatedHashesCounter += increaseBy
         }
     }
 
-    override fun increaseInserted(increaseBy: Int) {
+    override fun increaseInsertedHashes(increaseBy: Int) {
         synchronized(this) {
-            insertedCounter += increaseBy
+            insertedHashesCounter += increaseBy
         }
     }
 
-    override fun increaseDeleted(increaseBy: Int) {
+    override fun increaseDeletedHashes(increaseBy: Int) {
         synchronized(this) {
-            deletedCounter += increaseBy
+            deletedHashesCounter += increaseBy
         }
     }
-    override fun increaseObjects(increaseBy: Int) {
+    override fun increaseTotalHashes(increaseBy: Int) {
         synchronized(this) {
-            objectCounter += increaseBy
+            totalHashesCounter += increaseBy
+        }
+    }
+
+    fun reset() {
+        synchronized(this) {
+            totalHashesCounter = 0
+            updatedHashesCounter = 0
+            deletedHashesCounter = 0
+            insertedHashesCounter = 0
+            filesQueued = 0
+            filesRead = 0
+            validatedHashesCounter = 0
         }
     }
 }
@@ -135,13 +133,13 @@ fun formatter(n: Int): String =
     DecimalFormat("#,###", DecimalFormatSymbols(swissGermanLocale)).format(n)
 
 private fun createStatusLogMessage(): String {
-    val queuedFiles = formatter(StatusObject.fileQueued)
+    val queuedFiles = formatter(StatusObject.filesQueued)
     val readFiles = formatter(StatusObject.filesRead)
-    val countedObjects = formatter(StatusObject.objectCounter)
-    val validated = formatter(StatusObject.validatedCounter)
-    val inserted = formatter(StatusObject.insertedCounter)
-    val updated = formatter(StatusObject.updatedCounter)
-    val deleted = formatter(StatusObject.deletedCounter)
+    val countedObjects = formatter(StatusObject.totalHashesCounter)
+    val validated = formatter(StatusObject.validatedHashesCounter)
+    val inserted = formatter(StatusObject.insertedHashesCounter)
+    val updated = formatter(StatusObject.updatedHashesCounter)
+    val deleted = formatter(StatusObject.deletedHashesCounter)
     return "Queued Files: $queuedFiles - Read files: $readFiles - Processed Objects: $countedObjects - Validated: $validated - Inserted: $inserted - Updated: $updated - Deleted: $deleted"
 }
 
@@ -152,11 +150,18 @@ fun main() {
     }
     runBlocking {
         launch(Dispatchers.IO) {
-            val ibr = ImportByRecord(status = StatusObject, database = mongoDB)
-            val filesToRead = getAllFilePaths(Path.of(path))
+//            val ibrJob = importByRecord()
+//            while (ibrJob.isActive) {
+//                logger.info {
+//                    createStatusLogMessage()
+//                }
+//                delay(1000)
+//            }
 
-            val ibrJob = ibr.processHashFiles(filesToRead, this)
-            while (ibrJob.isActive) {
+            StatusObject.reset()
+
+            val ibpJob = importByPrefix()
+            while (ibpJob.isActive) {
                 logger.info {
                     createStatusLogMessage()
                 }
@@ -164,6 +169,19 @@ fun main() {
             }
         }
     }
+}
+
+private fun CoroutineScope.importByPrefix() = launch {
+    val ibp = ImportByPrefix(status = StatusObject, database = mongoDB)
+    val filesToRead = getAllFilePaths(Path.of(path))
+    ibp.processHashFiles(filesToRead, this)
+}
+
+private fun CoroutineScope.importByRecord() = launch {
+    val ibr = ImportByRecord(status = StatusObject, database = mongoDB)
+    val filesToRead = getAllFilePaths(Path.of(path))
+    ibr.processHashFiles(filesToRead, this)
+
 }
 
 
@@ -174,7 +192,7 @@ private fun CoroutineScope.getAllFilePaths(path: Path): ReceiveChannel<Path> =  
     val files = path.toFile().walk().maxDepth(1).asStream().parallel().filter { it.isFile }.map { it.toPath() }.iterator()
     while (files.hasNext()) {
         send(files.next())
-        StatusObject.increaseQueued()
+        StatusObject.increaseFilesQueued()
         logger.debug { createStatusLogMessage() }
     }
 }
