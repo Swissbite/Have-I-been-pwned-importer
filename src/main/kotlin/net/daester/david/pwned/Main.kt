@@ -18,20 +18,26 @@
  */
 
 @file:OptIn(ExperimentalCoroutinesApi::class)
+
 package net.daester.david.pwned
 
 import com.mongodb.kotlin.client.coroutine.MongoClient
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.produce
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import mu.KLogger
 import mu.KotlinLogging
-import net.daester.david.pwned.importer.by_prefix.ImportByPrefix
-import net.daester.david.pwned.importer.by_record.ImportByRecord
+import net.daester.david.pwned.importer.byPrefix.ImportByPrefix
+import net.daester.david.pwned.importer.byRecord.ImportByRecord
 import java.nio.file.Path
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
-import java.util.*
+import java.util.Locale
 import kotlin.streams.asStream
 import kotlin.system.exitProcess
 
@@ -44,21 +50,25 @@ private val mongoDB = mongoClient.getDatabase(database)
 
 private val systemProcesses = Runtime.getRuntime().availableProcessors()
 
-
-private val logger: KLogger = KotlinLogging.logger {  }
-
+private val logger: KLogger = KotlinLogging.logger { }
 
 interface Status {
     fun increaseFilesQueued()
+
     fun increaseFilesRead()
+
     fun increaseValidatedHashes(increaseBy: Int = 1)
+
     fun increaseInsertedHashes(increaseBy: Int = 1)
+
     fun increaseDeletedHashes(increaseBy: Int = 1)
+
     fun increaseTotalHashes(increaseBy: Int = 1)
+
     fun increaseUpdatedHashes(increaseBy: Int = 1)
 }
 
-private object StatusObject: Status {
+private object StatusObject : Status {
     var filesQueued: Int = 0
         private set
     var filesRead: Int = 0
@@ -74,11 +84,13 @@ private object StatusObject: Status {
         private set
     var deletedHashesCounter: Int = 0
         private set
+
     override fun increaseFilesQueued() {
         synchronized(this) {
             ++filesQueued
         }
     }
+
     override fun increaseFilesRead() {
         synchronized(this) {
             ++filesRead
@@ -108,6 +120,7 @@ private object StatusObject: Status {
             deletedHashesCounter += increaseBy
         }
     }
+
     override fun increaseTotalHashes(increaseBy: Int) {
         synchronized(this) {
             totalHashesCounter += increaseBy
@@ -127,10 +140,9 @@ private object StatusObject: Status {
     }
 }
 
-
 private val swissGermanLocale: Locale = Locale.of("gsw")
-fun formatter(n: Int): String =
-    DecimalFormat("#,###", DecimalFormatSymbols(swissGermanLocale)).format(n)
+
+fun formatter(n: Int): String = DecimalFormat("#,###", DecimalFormatSymbols(swissGermanLocale)).format(n)
 
 private fun createStatusLogMessage(): String {
     val queuedFiles = formatter(StatusObject.filesQueued)
@@ -140,7 +152,13 @@ private fun createStatusLogMessage(): String {
     val inserted = formatter(StatusObject.insertedHashesCounter)
     val updated = formatter(StatusObject.updatedHashesCounter)
     val deleted = formatter(StatusObject.deletedHashesCounter)
-    return "Queued Files: $queuedFiles - Read files: $readFiles - Processed Objects: $countedObjects - Validated: $validated - Inserted: $inserted - Updated: $updated - Deleted: $deleted"
+    return "Queued Files: $queuedFiles" +
+        " - Read files: $readFiles" +
+        " - Processed Objects: $countedObjects" +
+        " - Validated: $validated" +
+        " - Inserted: $inserted" +
+        " - Updated: $updated" +
+        " - Deleted: $deleted"
 }
 
 fun main() {
@@ -171,28 +189,29 @@ fun main() {
     }
 }
 
-private fun CoroutineScope.importByPrefix() = launch {
-    val ibp = ImportByPrefix(status = StatusObject, database = mongoDB)
-    val filesToRead = getAllFilePaths(Path.of(path))
-    ibp.processHashFiles(filesToRead, this)
-}
-
-private fun CoroutineScope.importByRecord() = launch {
-    val ibr = ImportByRecord(status = StatusObject, database = mongoDB)
-    val filesToRead = getAllFilePaths(Path.of(path))
-    ibr.processHashFiles(filesToRead, this)
-
-}
-
-
-private fun CoroutineScope.getAllFilePaths(path: Path): ReceiveChannel<Path> =  produce(
-    capacity = systemProcesses) {
-
-    logger.info { "Path: ${path.toAbsolutePath()}" }
-    val files = path.toFile().walk().maxDepth(1).asStream().parallel().filter { it.isFile }.map { it.toPath() }.iterator()
-    while (files.hasNext()) {
-        send(files.next())
-        StatusObject.increaseFilesQueued()
-        logger.debug { createStatusLogMessage() }
+private fun CoroutineScope.importByPrefix() =
+    launch {
+        val ibp = ImportByPrefix(status = StatusObject, database = mongoDB)
+        val filesToRead = getAllFilePaths(Path.of(path))
+        ibp.processHashFiles(filesToRead, this)
     }
-}
+
+private fun CoroutineScope.importByRecord() =
+    launch {
+        val ibr = ImportByRecord(status = StatusObject, database = mongoDB)
+        val filesToRead = getAllFilePaths(Path.of(path))
+        ibr.processHashFiles(filesToRead, this)
+    }
+
+private fun CoroutineScope.getAllFilePaths(path: Path): ReceiveChannel<Path> =
+    produce(
+        capacity = systemProcesses,
+    ) {
+        logger.info { "Path: ${path.toAbsolutePath()}" }
+        val files = path.toFile().walk().maxDepth(1).asStream().parallel().filter { it.isFile }.map { it.toPath() }.iterator()
+        while (files.hasNext()) {
+            send(files.next())
+            StatusObject.increaseFilesQueued()
+            logger.debug { createStatusLogMessage() }
+        }
+    }
