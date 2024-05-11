@@ -20,4 +20,4 @@
 plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "0.5.0"
 }
-rootProject.name = "Have I been pwned - importer"
+rootProject.name = "have-I-been-pwned-importer"

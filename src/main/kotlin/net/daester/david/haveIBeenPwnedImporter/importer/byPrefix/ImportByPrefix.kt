@@ -17,7 +17,7 @@
  * with "Have I been pwned - importer". If not, see <https://www.gnu.org/licenses/>.
  */
 
-package net.daester.david.pwned.importer.byPrefix
+package net.daester.david.haveIBeenPwnedImporter.importer.byPrefix
 
 import com.mongodb.client.model.Filters.eq
 import com.mongodb.client.model.FindOneAndReplaceOptions
@@ -27,16 +27,16 @@ import com.mongodb.kotlin.client.coroutine.MongoCollection
 import com.mongodb.kotlin.client.coroutine.MongoDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.produce
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.Job
 import mu.KLogger
 import mu.KotlinLogging
-import net.daester.david.pwned.Status
+import net.daester.david.haveIBeenPwnedImporter.Status
 import org.bson.BsonDocument
 import org.bson.BsonElement
 import org.bson.BsonInt32

@@ -19,7 +19,7 @@
 
 @file:OptIn(ExperimentalCoroutinesApi::class)
 
-package net.daester.david.pwned.importer.byRecord
+package net.daester.david.haveIBeenPwnedImporter.importer.byRecord
 
 import com.mongodb.client.model.BulkWriteOptions
 import com.mongodb.client.model.DeleteOneModel
@@ -39,7 +39,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import mu.KLogger
 import mu.KotlinLogging
-import net.daester.david.pwned.Status
+import net.daester.david.haveIBeenPwnedImporter.Status
 import org.bson.BsonDocument
 import org.bson.BsonElement
 import org.bson.BsonInt32

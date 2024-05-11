@@ -19,9 +19,14 @@
 
 @file:OptIn(ExperimentalCoroutinesApi::class)
 
-package net.daester.david.pwned
+package net.daester.david.haveIBeenPwnedImporter
 
 import com.mongodb.kotlin.client.coroutine.MongoClient
+import com.mongodb.kotlin.client.coroutine.MongoDatabase
+import kotlinx.cli.ArgParser
+import kotlinx.cli.ArgType
+import kotlinx.cli.default
+import kotlinx.cli.required
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -32,21 +37,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import mu.KLogger
 import mu.KotlinLogging
-import net.daester.david.pwned.importer.byPrefix.ImportByPrefix
-import net.daester.david.pwned.importer.byRecord.ImportByRecord
+import net.daester.david.haveIBeenPwnedImporter.importer.byPrefix.ImportByPrefix
+import net.daester.david.haveIBeenPwnedImporter.importer.byRecord.ImportByRecord
 import java.nio.file.Path
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
 import java.util.Locale
 import kotlin.streams.asStream
-import kotlin.system.exitProcess
-
-private val mongodbConnectionURL = System.getenv("MONGODB_CONNECTION_URL") ?: "mongodb://admin:admin1234@localhost:27017"
-private val path = System.getenv("PWNED_PASSWORDS_DIRECTORY")
-private val database = System.getenv("MONGODB_DATABASE") ?: "pwnd"
-private val mongoClient: MongoClient = MongoClient.create(mongodbConnectionURL)
-
-private val mongoDB = mongoClient.getDatabase(database)
 
 private val systemProcesses = Runtime.getRuntime().availableProcessors()
 
@@ -161,47 +158,65 @@ private fun createStatusLogMessage(): String {
         " - Deleted: $deleted"
 }
 
-fun main() {
-    if (path == null) {
-        logger.error { "Environment PWNED_PASSWORDS_DIRECTORY is not set. Exit" }
-        exitProcess(1)
-    }
+enum class StorageVariant { SINGLE, GROUPED }
+
+fun main(args: Array<String>) {
+    val parser = ArgParser("Pwned Password Hash Importer")
+    val passwordsDirectory by parser.option(ArgType.String, shortName = "p", description = "Passwords Directory").required()
+    val mongoDbConnectionURL by parser.option(
+        ArgType.String,
+        shortName = "u",
+        description = "MongoDB Connection URL",
+    ).default("mongodb://admin:admin1234@localhost:27017")
+    val mongoDbDatabase by parser.option(ArgType.String, shortName = "d", description = "MongoDB Database").default("pwnd")
+    val storageVariant by parser.option(
+        ArgType.Choice<StorageVariant>(),
+        shortName = "s",
+        description = "Storage Variant. Either by single hash (SINGLE) or grouped by prefix (GROUPED)",
+    ).default(StorageVariant.GROUPED)
+    parser.parse(args)
+
+    val mongoClient: MongoClient = MongoClient.create(mongoDbConnectionURL)
+
+    val mongoDB = mongoClient.getDatabase(mongoDbDatabase)
+
     runBlocking {
         launch(Dispatchers.IO) {
-//            val ibrJob = importByRecord()
-//            while (ibrJob.isActive) {
-//                logger.info {
-//                    createStatusLogMessage()
-//                }
-//                delay(1000)
-//            }
-
-            StatusObject.reset()
-
-            val ibpJob = importByPrefix()
-            while (ibpJob.isActive) {
+            val job =
+                when (storageVariant) {
+                    StorageVariant.SINGLE -> importByRecord(mongoDB, passwordsDirectory)
+                    StorageVariant.GROUPED -> importByPrefix(mongoDB, passwordsDirectory)
+                }
+            logger.info {
+                createStatusLogMessage()
+            }
+            while (job.isActive) {
+                delay(1000)
                 logger.info {
                     createStatusLogMessage()
                 }
-                delay(1000)
             }
         }
     }
 }
 
-private fun CoroutineScope.importByPrefix() =
-    launch {
-        val ibp = ImportByPrefix(status = StatusObject, database = mongoDB)
-        val filesToRead = getAllFilePaths(Path.of(path))
-        ibp.processHashFiles(filesToRead, this)
-    }
+private fun CoroutineScope.importByPrefix(
+    mongoDB: MongoDatabase,
+    path: String,
+) = launch {
+    val ibp = ImportByPrefix(status = StatusObject, database = mongoDB)
+    val filesToRead = getAllFilePaths(Path.of(path))
+    ibp.processHashFiles(filesToRead, this)
+}
 
-private fun CoroutineScope.importByRecord() =
-    launch {
-        val ibr = ImportByRecord(status = StatusObject, database = mongoDB)
-        val filesToRead = getAllFilePaths(Path.of(path))
-        ibr.processHashFiles(filesToRead, this)
-    }
+private fun CoroutineScope.importByRecord(
+    mongoDB: MongoDatabase,
+    path: String,
+) = launch {
+    val ibr = ImportByRecord(status = StatusObject, database = mongoDB)
+    val filesToRead = getAllFilePaths(Path.of(path))
+    ibr.processHashFiles(filesToRead, this)
+}
 
 private fun CoroutineScope.getAllFilePaths(path: Path): ReceiveChannel<Path> =
     produce(

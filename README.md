@@ -23,11 +23,4 @@ And: I wanted to try the `Channel` API of `kotlinx.coroutines`.
    - You may use a tool like [PwnedPasswordsDownloader](https://github.com/HaveIBeenPwned/PwnedPasswordsDownloader/)
 2. Start a database (currently, mongodb) with `podman` or `docker`
    - possible with `podman compose up -d` or `docker compose up -d` 
-3. Configure the [Environment](#environment-variables)
-
-## Environment Variables
-| Variable                    | Default Value                               | Description                                             |
-|:----------------------------|:--------------------------------------------|:--------------------------------------------------------|
-| `MONGODB_CONNECTION_URL`    | `mongodb://admin:admin1234@localhost:27017` | Full qualified connection string                        |
-| `MONGODB_DATABASE`          | `pwnd`                                      | Database to connect.                                    |
-| `PWNED_PASSWORDS_DIRECTORY` |                                             | Full qualified path to all files of `Have I Been Pwned` |
+3. Run the application with all required arguments

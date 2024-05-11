@@ -11,7 +11,7 @@
         </encoder>
     </appender>
 
-    <logger name="net.daester.david.pwned" level="info" />
+    <logger name="net.daester.david.haveIBeenPwnedImporter" level="info" />
     <root level="info">
         <appender-ref ref="STDOUT"/>
     </root>
