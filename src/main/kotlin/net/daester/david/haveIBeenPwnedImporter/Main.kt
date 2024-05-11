@@ -66,6 +66,8 @@ interface Status {
     fun increaseTotalHashes(increaseBy: Int = 1)
 
     fun increaseUpdatedHashes(increaseBy: Int = 1)
+
+    val currentStatusLogMessage: String
 }
 
 data class CurrentState(
@@ -83,54 +85,56 @@ object StatusObject : Status {
     val currentState = statusCurrentStateMutable.asStateFlow()
 
     override fun increaseFilesQueued() {
-        statusCurrentStateMutable.update { status2 -> status2.copy(filesQueued = status2.filesQueued + 1) }
+        statusCurrentStateMutable.update { state -> state.copy(filesQueued = state.filesQueued + 1) }
     }
 
     override fun increaseFilesRead() {
-        statusCurrentStateMutable.update { status2 -> status2.copy(filesRead = status2.filesRead + 1) }
+        statusCurrentStateMutable.update { state -> state.copy(filesRead = state.filesRead + 1) }
     }
 
     override fun increaseValidatedHashes(increaseBy: Int) {
-        statusCurrentStateMutable.update { status2 -> status2.copy(validatedHashesCounter = status2.validatedHashesCounter + increaseBy) }
+        statusCurrentStateMutable.update { state -> state.copy(validatedHashesCounter = state.validatedHashesCounter + increaseBy) }
     }
 
     override fun increaseInsertedHashes(increaseBy: Int) {
-        statusCurrentStateMutable.update { status2 -> status2.copy(insertedHashesCounter = status2.insertedHashesCounter + increaseBy) }
+        statusCurrentStateMutable.update { state -> state.copy(insertedHashesCounter = state.insertedHashesCounter + increaseBy) }
     }
 
     override fun increaseDeletedHashes(increaseBy: Int) {
-        statusCurrentStateMutable.update { status2 -> status2.copy(deletedHashesCounter = status2.deletedHashesCounter + increaseBy) }
+        statusCurrentStateMutable.update { state -> state.copy(deletedHashesCounter = state.deletedHashesCounter + increaseBy) }
     }
 
     override fun increaseTotalHashes(increaseBy: Int) {
-        statusCurrentStateMutable.update { status2 -> status2.copy(totalHashesCounter = status2.totalHashesCounter + increaseBy) }
+        statusCurrentStateMutable.update { state -> state.copy(totalHashesCounter = state.totalHashesCounter + increaseBy) }
     }
 
     override fun increaseUpdatedHashes(increaseBy: Int) {
-        statusCurrentStateMutable.update { status2 -> status2.copy(updatedHashesCounter = status2.updatedHashesCounter + increaseBy) }
+        statusCurrentStateMutable.update { state -> state.copy(updatedHashesCounter = state.updatedHashesCounter + increaseBy) }
     }
+
+    override val currentStatusLogMessage: String
+        get() {
+            val status = currentState.value
+            val queuedFiles = formatter(status.filesQueued)
+            val readFiles = formatter(status.filesRead)
+            val countedObjects = formatter(status.totalHashesCounter)
+            val validated = formatter(status.validatedHashesCounter)
+            val inserted = formatter(status.insertedHashesCounter)
+            val updated = formatter(status.updatedHashesCounter)
+            val deleted = formatter(status.deletedHashesCounter)
+            return "Queued Files: $queuedFiles" +
+                " - Read files: $readFiles" +
+                " - Processed Objects: $countedObjects" +
+                " - Validated: $validated" +
+                " - Inserted: $inserted" +
+                " - Updated: $updated" +
+                " - Deleted: $deleted"
+        }
 }
 
 private val swissGermanLocale: Locale = Locale.of("gsw")
 
 fun formatter(n: Int): String = DecimalFormat("#,###", DecimalFormatSymbols(swissGermanLocale)).format(n)
-
-private fun createStatusLogMessage(status: CurrentState): String {
-    val queuedFiles = formatter(status.filesQueued)
-    val readFiles = formatter(status.filesRead)
-    val countedObjects = formatter(status.totalHashesCounter)
-    val validated = formatter(status.validatedHashesCounter)
-    val inserted = formatter(status.insertedHashesCounter)
-    val updated = formatter(status.updatedHashesCounter)
-    val deleted = formatter(status.deletedHashesCounter)
-    return "Queued Files: $queuedFiles" +
-        " - Read files: $readFiles" +
-        " - Processed Objects: $countedObjects" +
-        " - Validated: $validated" +
-        " - Inserted: $inserted" +
-        " - Updated: $updated" +
-        " - Deleted: $deleted"
-}
 
 enum class StorageVariant { SINGLE, GROUPED }
 
@@ -162,12 +166,12 @@ fun main(args: Array<String>) {
                     StorageVariant.GROUPED -> importByPrefix(mongoDB, passwordsDirectory)
                 }
             logger.info {
-                createStatusLogMessage(StatusObject.currentState.value)
+                StatusObject.currentStatusLogMessage
             }
             while (job.isActive) {
                 delay(1000)
                 logger.info {
-                    createStatusLogMessage(StatusObject.currentState.value)
+                    StatusObject.currentStatusLogMessage
                 }
             }
         }
@@ -201,6 +205,6 @@ private fun CoroutineScope.getAllFilePaths(path: Path): ReceiveChannel<Path> =
         while (files.hasNext()) {
             send(files.next())
             StatusObject.increaseFilesQueued()
-            logger.debug { createStatusLogMessage(StatusObject.currentState.value) }
+            logger.debug { StatusObject.currentStatusLogMessage }
         }
     }
