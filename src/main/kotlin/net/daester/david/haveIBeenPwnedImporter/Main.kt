@@ -17,29 +17,30 @@
  * with "Have I been pwned - importer". If not, see <https://www.gnu.org/licenses/>.
  */
 
-@file:OptIn(ExperimentalCoroutinesApi::class)
-
 package net.daester.david.haveIBeenPwnedImporter
 
+import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.parameters.options.help
+import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.options.prompt
+import com.github.ajalt.clikt.parameters.types.boolean
+import com.github.ajalt.clikt.parameters.types.enum
+import com.github.ajalt.clikt.parameters.types.path
 import com.mongodb.kotlin.client.coroutine.MongoClient
 import com.mongodb.kotlin.client.coroutine.MongoDatabase
-import kotlinx.cli.ArgParser
-import kotlinx.cli.ArgType
-import kotlinx.cli.default
-import kotlinx.cli.required
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.ReceiveChannel
-import kotlinx.coroutines.channels.produce
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.produceIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import mu.KLogger
 import mu.KotlinLogging
+import net.daester.david.haveIBeenPwnedImporter.downloader.Downloader.downloadToPath
 import net.daester.david.haveIBeenPwnedImporter.importer.byPrefix.ImportByPrefix
 import net.daester.david.haveIBeenPwnedImporter.importer.byRecord.ImportByRecord
 import java.nio.file.Path
@@ -52,159 +53,81 @@ private val systemProcesses = Runtime.getRuntime().availableProcessors()
 
 private val logger: KLogger = KotlinLogging.logger { }
 
-interface Status {
-    fun increaseFilesQueued()
-
-    fun increaseFilesRead()
-
-    fun increaseValidatedHashes(increaseBy: Int = 1)
-
-    fun increaseInsertedHashes(increaseBy: Int = 1)
-
-    fun increaseDeletedHashes(increaseBy: Int = 1)
-
-    fun increaseTotalHashes(increaseBy: Int = 1)
-
-    fun increaseUpdatedHashes(increaseBy: Int = 1)
-
-    val currentStatusLogMessage: String
-}
-
-data class CurrentState(
-    val filesQueued: Int = 0,
-    val filesRead: Int = 0,
-    val totalHashesCounter: Int = 0,
-    val validatedHashesCounter: Int = 0,
-    val updatedHashesCounter: Int = 0,
-    val insertedHashesCounter: Int = 0,
-    val deletedHashesCounter: Int = 0,
-)
-
-object StatusObject : Status {
-    private val statusCurrentStateMutable = MutableStateFlow(CurrentState())
-    val currentState = statusCurrentStateMutable.asStateFlow()
-
-    override fun increaseFilesQueued() {
-        statusCurrentStateMutable.update { state -> state.copy(filesQueued = state.filesQueued + 1) }
-    }
-
-    override fun increaseFilesRead() {
-        statusCurrentStateMutable.update { state -> state.copy(filesRead = state.filesRead + 1) }
-    }
-
-    override fun increaseValidatedHashes(increaseBy: Int) {
-        statusCurrentStateMutable.update { state -> state.copy(validatedHashesCounter = state.validatedHashesCounter + increaseBy) }
-    }
-
-    override fun increaseInsertedHashes(increaseBy: Int) {
-        statusCurrentStateMutable.update { state -> state.copy(insertedHashesCounter = state.insertedHashesCounter + increaseBy) }
-    }
-
-    override fun increaseDeletedHashes(increaseBy: Int) {
-        statusCurrentStateMutable.update { state -> state.copy(deletedHashesCounter = state.deletedHashesCounter + increaseBy) }
-    }
-
-    override fun increaseTotalHashes(increaseBy: Int) {
-        statusCurrentStateMutable.update { state -> state.copy(totalHashesCounter = state.totalHashesCounter + increaseBy) }
-    }
-
-    override fun increaseUpdatedHashes(increaseBy: Int) {
-        statusCurrentStateMutable.update { state -> state.copy(updatedHashesCounter = state.updatedHashesCounter + increaseBy) }
-    }
-
-    override val currentStatusLogMessage: String
-        get() {
-            val status = currentState.value
-            val queuedFiles = formatter(status.filesQueued)
-            val readFiles = formatter(status.filesRead)
-            val countedObjects = formatter(status.totalHashesCounter)
-            val validated = formatter(status.validatedHashesCounter)
-            val inserted = formatter(status.insertedHashesCounter)
-            val updated = formatter(status.updatedHashesCounter)
-            val deleted = formatter(status.deletedHashesCounter)
-            return "Queued Files: $queuedFiles" +
-                " - Read files: $readFiles" +
-                " - Processed Objects: $countedObjects" +
-                " - Validated: $validated" +
-                " - Inserted: $inserted" +
-                " - Updated: $updated" +
-                " - Deleted: $deleted"
-        }
-}
-
 private val swissGermanLocale: Locale = Locale.of("gsw")
 
 fun formatter(n: Int): String = DecimalFormat("#,###", DecimalFormatSymbols(swissGermanLocale)).format(n)
 
 enum class StorageVariant { SINGLE, GROUPED }
 
-fun main(args: Array<String>) {
-    val parser = ArgParser("Pwned Password Hash Importer")
-    val passwordsDirectory by parser.option(ArgType.String, shortName = "p", description = "Passwords Directory").required()
-    val mongoDbConnectionURL by parser.option(
-        ArgType.String,
-        shortName = "u",
-        description = "MongoDB Connection URL",
-    ).default("mongodb://admin:admin1234@localhost:27017")
-    val mongoDbDatabase by parser.option(ArgType.String, shortName = "d", description = "MongoDB Database").default("pwnd")
-    val storageVariant by parser.option(
-        ArgType.Choice<StorageVariant>(),
-        shortName = "s",
-        description = "Storage Variant. Either by single hash (SINGLE) or grouped by prefix (GROUPED)",
-    ).default(StorageVariant.GROUPED)
-    parser.parse(args)
+class Importer : CliktCommand() {
+    private val passwordsDirectory: Path by option().path().help("Passwords Directory").prompt("Enter directory to cache passwords")
+    private val mongoDbConnectionURL: String by option().prompt("MongoDB Connection URL", "mongodb://admin:admin1234@localhost:27017")
+    private val mongoDbDatabase: String by option().prompt("MongoDB Database", "pwnd")
+    private val storageVariant: StorageVariant by option().enum<StorageVariant>().prompt(
+        "Storage Variant. Either by single hash (SINGLE) or grouped by prefix (GROUPED)",
+        StorageVariant.GROUPED,
+    )
+    private val shouldUpdateFromInternet: Boolean by option().boolean().prompt("Should pwned passwords be updated from internet?", false)
 
-    val mongoClient: MongoClient = MongoClient.create(mongoDbConnectionURL)
-
-    val mongoDB = mongoClient.getDatabase(mongoDbDatabase)
-
-    runBlocking {
-        launch(Dispatchers.IO) {
-            val job =
-                when (storageVariant) {
-                    StorageVariant.SINGLE -> importByRecord(mongoDB, passwordsDirectory)
-                    StorageVariant.GROUPED -> importByPrefix(mongoDB, passwordsDirectory)
-                }
-            logger.info {
-                StatusObject.currentStatusLogMessage
-            }
-            while (job.isActive) {
-                delay(1000)
+    override fun run() {
+        val mongoClient: MongoClient = MongoClient.create(mongoDbConnectionURL)
+        val mongoDB = mongoClient.getDatabase(mongoDbDatabase)
+        runBlocking {
+            launch(Dispatchers.IO) {
+                val pathsChannel =
+                    when (shouldUpdateFromInternet) {
+                        true -> downloadToPath(passwordsDirectory)
+                        false -> getAllFilePaths(passwordsDirectory)
+                    }
+                val job =
+                    when (storageVariant) {
+                        StorageVariant.SINGLE -> importByRecord(mongoDB, pathsChannel)
+                        StorageVariant.GROUPED -> importByPrefix(mongoDB, pathsChannel)
+                    }
                 logger.info {
                     StatusObject.currentStatusLogMessage
+                }
+                while (job.isActive) {
+                    delay(1000)
+                    logger.info {
+                        StatusObject.currentStatusLogMessage
+                    }
                 }
             }
         }
     }
 }
 
+fun main(args: Array<String>) = Importer().main(args)
+
 private fun CoroutineScope.importByPrefix(
     mongoDB: MongoDatabase,
-    path: String,
+    pathsChannel: ReceiveChannel<Path>,
 ) = launch {
     val ibp = ImportByPrefix(status = StatusObject, database = mongoDB)
-    val filesToRead = getAllFilePaths(Path.of(path))
-    ibp.processHashFiles(filesToRead, this)
+    ibp.processHashFiles(pathsChannel, this)
 }
 
 private fun CoroutineScope.importByRecord(
     mongoDB: MongoDatabase,
-    path: String,
+    pathsChannel: ReceiveChannel<Path>,
 ) = launch {
     val ibr = ImportByRecord(status = StatusObject, database = mongoDB)
-    val filesToRead = getAllFilePaths(Path.of(path))
-    ibr.processHashFiles(filesToRead, this)
+    ibr.processHashFiles(pathsChannel, this)
 }
 
-private fun CoroutineScope.getAllFilePaths(path: Path): ReceiveChannel<Path> =
-    produce(
-        capacity = systemProcesses,
-    ) {
+private fun getAllFilePathsAsFlow(path: Path): Flow<Path> =
+    flow {
         logger.info { "Path: ${path.toAbsolutePath()}" }
         val files = path.toFile().walk().maxDepth(1).asStream().parallel().filter { it.isFile }.map { it.toPath() }.iterator()
         while (files.hasNext()) {
-            send(files.next())
+            emit(files.next())
             StatusObject.increaseFilesQueued()
             logger.debug { StatusObject.currentStatusLogMessage }
         }
     }
+
+private fun CoroutineScope.getAllFilePaths(path: Path): ReceiveChannel<Path> =
+    getAllFilePathsAsFlow(path)
+        .buffer(systemProcesses)
+        .produceIn(this)

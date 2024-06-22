@@ -16,9 +16,10 @@
  * You should have received a copy of the GNU General Public License along with
  * "Have I been pwned - importer". If not, see <https://www.gnu.org/licenses/>.
  */
+val ktorVersion = "2.3.11"
 
 plugins {
-    kotlin("jvm") version "1.9.24"
+    kotlin("jvm") version "2.0.0"
     application
     id("com.github.johnrengelman.shadow") version "8.1.1"
     id("org.jlleitschuh.gradle.ktlint") version "12.1.1"
@@ -43,7 +44,10 @@ dependencies {
     implementation("org.slf4j:slf4j-api:2.0.12")
     implementation("ch.qos.logback:logback-core:1.4.12")
     implementation("ch.qos.logback:logback-classic:1.4.12")
-    implementation("org.jetbrains.kotlinx:kotlinx-cli:0.3.6")
+    implementation("com.github.ajalt.clikt:clikt:4.4.0")
+    implementation("io.ktor:ktor-client-core:$ktorVersion")
+    implementation("io.ktor:ktor-client-okhttp:$ktorVersion")
+    implementation("io.ktor:ktor-client-logging:$ktorVersion")
 }
 
 tasks.test {
