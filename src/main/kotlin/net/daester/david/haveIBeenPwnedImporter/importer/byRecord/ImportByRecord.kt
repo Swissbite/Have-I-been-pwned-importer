@@ -31,14 +31,14 @@ import com.mongodb.client.model.UpdateOneModel
 import com.mongodb.client.model.Updates
 import com.mongodb.kotlin.client.coroutine.MongoCollection
 import com.mongodb.kotlin.client.coroutine.MongoDatabase
+import io.github.oshai.kotlinlogging.KLogger
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.produce
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
-import mu.KLogger
-import mu.KotlinLogging
 import net.daester.david.haveIBeenPwnedImporter.Status
 import org.bson.BsonDocument
 import org.bson.BsonElement

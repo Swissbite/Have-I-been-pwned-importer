@@ -24,14 +24,14 @@ import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.HttpRequestRetry
 import io.ktor.client.request.prepareGet
 import io.ktor.client.statement.bodyAsChannel
-import io.ktor.utils.io.core.isEmpty
-import io.ktor.utils.io.core.readBytes
+import io.ktor.utils.io.readRemaining
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.produce
+import kotlinx.io.readByteArray
 import net.daester.david.haveIBeenPwnedImporter.StatusObject
 import okhttp3.Dispatcher
 import java.nio.file.Path
@@ -79,8 +79,8 @@ object Downloader {
                                 outputPath.createFile()
                                 while (!channel.isClosedForRead) {
                                     val packet = channel.readRemaining(DEFAULT_BUFFER_SIZE.toLong())
-                                    while (!packet.isEmpty) {
-                                        outputPath.appendBytes(packet.readBytes())
+                                    while (!packet.exhausted()) {
+                                        outputPath.appendBytes(packet.readByteArray())
                                     }
                                 }
                                 send(outputPath)

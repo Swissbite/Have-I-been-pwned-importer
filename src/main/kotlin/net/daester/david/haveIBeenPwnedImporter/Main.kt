@@ -20,6 +20,7 @@
 package net.daester.david.haveIBeenPwnedImporter
 
 import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.core.main
 import com.github.ajalt.clikt.parameters.options.help
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.prompt
@@ -28,6 +29,8 @@ import com.github.ajalt.clikt.parameters.types.enum
 import com.github.ajalt.clikt.parameters.types.path
 import com.mongodb.kotlin.client.coroutine.MongoClient
 import com.mongodb.kotlin.client.coroutine.MongoDatabase
+import io.github.oshai.kotlinlogging.KLogger
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.ReceiveChannel
@@ -38,8 +41,6 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.produceIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import mu.KLogger
-import mu.KotlinLogging
 import net.daester.david.haveIBeenPwnedImporter.downloader.Downloader.downloadToPath
 import net.daester.david.haveIBeenPwnedImporter.importer.byPrefix.ImportByPrefix
 import net.daester.david.haveIBeenPwnedImporter.importer.byRecord.ImportByRecord

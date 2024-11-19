@@ -25,6 +25,8 @@ import com.mongodb.client.model.IndexModel
 import com.mongodb.client.model.ReturnDocument
 import com.mongodb.kotlin.client.coroutine.MongoCollection
 import com.mongodb.kotlin.client.coroutine.MongoDatabase
+import io.github.oshai.kotlinlogging.KLogger
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -41,8 +43,6 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.zip
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import mu.KLogger
-import mu.KotlinLogging
 import net.daester.david.haveIBeenPwnedImporter.Status
 import org.bson.BsonDocument
 import org.bson.BsonElement
@@ -118,7 +118,7 @@ class ImportByPrefix(
      * @param scope Needed [CoroutineScope] to launch multiple [Job]s within this suspended function
      * @see ImportByPrefix
      */
-    suspend fun processHashFiles(
+    fun processHashFiles(
         fileChannel: ReceiveChannel<Path>,
         scope: CoroutineScope,
     ) {
