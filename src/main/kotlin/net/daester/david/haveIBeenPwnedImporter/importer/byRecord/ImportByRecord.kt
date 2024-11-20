@@ -58,6 +58,8 @@ class ImportByRecord(
     private val occurrenceIndex = IndexModel(BsonDocument(listOf(BsonElement(HashWithOccurrence::occurrence.name, BsonInt32(-1)))))
     private val maxCoroutineFn = systemProcesses * 20
 
+    private val defaultCapacity: Int = maxCoroutineFn * 1000
+
     init {
         logger.info {
             "Setup import by record. " +
@@ -85,7 +87,7 @@ class ImportByRecord(
 
     private fun CoroutineScope.extractFileContent(fileChannel: ReceiveChannel<Path>): ReceiveChannel<Pair<Prefix, Map<Hash, Int>>> =
         produce(
-            capacity = systemProcesses,
+            capacity = defaultCapacity,
         ) {
             for (path in fileChannel) {
                 logger.trace { "START: extractFileContent for ${path.fileName}" }
@@ -106,7 +108,7 @@ class ImportByRecord(
         fileContent: ReceiveChannel<Pair<Prefix, Map<Hash, Int>>>,
         dataSourceCollection: MongoCollection<HashWithOccurrence>,
     ): ReceiveChannel<ChangeObject> =
-        produce(capacity = systemProcesses) {
+        produce(capacity = defaultCapacity) {
             for ((prefix, data) in fileContent) {
                 logger.trace { "START: calculate upsert for prefix $prefix" }
                 val toDelete = mutableListOf<HashWithOccurrence>()

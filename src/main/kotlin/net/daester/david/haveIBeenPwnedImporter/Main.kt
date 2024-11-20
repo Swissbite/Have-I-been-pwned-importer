@@ -130,5 +130,5 @@ private fun getAllFilePathsAsFlow(path: Path): Flow<Path> =
 
 private fun CoroutineScope.getAllFilePaths(path: Path): ReceiveChannel<Path> =
     getAllFilePathsAsFlow(path)
-        .buffer(systemProcesses)
+        .buffer(systemProcesses * 1000)
         .produceIn(this)

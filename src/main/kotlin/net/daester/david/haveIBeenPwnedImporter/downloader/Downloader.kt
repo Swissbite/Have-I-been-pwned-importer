@@ -29,6 +29,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.produce
 import kotlinx.io.readByteArray
@@ -43,7 +44,7 @@ object Downloader {
     private val hexCubicRange = (0..<16 * 16 * 16).map { it.toString(16).padStart(3, '0').uppercase() }
     private val hexSquareRange = (0..<16 * 16).map { it.toString(16).padStart(2, '0').uppercase() }
 
-    private val client =
+    private val defaultClient =
         HttpClient(OkHttp) {
 
             engine {
@@ -65,34 +66,48 @@ object Downloader {
         }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    fun CoroutineScope.downloadToPath(path: Path): ReceiveChannel<Path> =
+    fun CoroutineScope.downloadToPath(
+        path: Path,
+        client: HttpClient = defaultClient,
+    ): ReceiveChannel<Path> =
         produce(capacity = Int.MAX_VALUE) {
-            hexSquareRange.map { first3Chars ->
+            hexSquareRange.map { firstPartOfPrefix ->
                 async(start = CoroutineStart.LAZY) {
-                    hexCubicRange.map { last2Chars ->
+                    hexCubicRange.map { secondPartOfPrefix ->
                         async {
-                            val prefix = "$first3Chars$last2Chars"
-                            val outputPath = path.resolve("$prefix.txt")
-                            client.prepareGet("https://api.pwnedpasswords.com/range/$prefix").execute { response ->
-                                val channel = response.bodyAsChannel()
-                                outputPath.deleteIfExists()
-                                outputPath.createFile()
-                                while (!channel.isClosedForRead) {
-                                    val packet = channel.readRemaining(DEFAULT_BUFFER_SIZE.toLong())
-                                    while (!packet.exhausted()) {
-                                        outputPath.appendBytes(packet.readByteArray())
-                                    }
-                                }
-                                send(outputPath)
-                                StatusObject.increaseFilesQueued()
-                            }
+                            val prefix = "$firstPartOfPrefix$secondPartOfPrefix"
+                            val outputPath = downloadOwnedPasswordRangeFileToPath(path, prefix, client)
+                            send(outputPath)
+                            StatusObject.increaseFilesQueued()
                         }
                     }
                 }
             }.forEach { deferred ->
-                deferred.await().forEach {
-                    it.await()
+                deferred.await().map {
+                    async {
+                        it.await()
+                    }
+                }.awaitAll()
+            }
+        }
+
+    private suspend fun downloadOwnedPasswordRangeFileToPath(
+        path: Path,
+        prefix: String,
+        client: HttpClient,
+    ): Path =
+        client.prepareGet("https://api.pwnedpasswords.com/range/$prefix").execute { response ->
+            val outputPath = path.resolve("$prefix.txt")
+
+            val channel = response.bodyAsChannel()
+            outputPath.deleteIfExists()
+            outputPath.createFile()
+            while (!channel.isClosedForRead) {
+                val packet = channel.readRemaining(DEFAULT_BUFFER_SIZE.toLong())
+                while (!packet.exhausted()) {
+                    outputPath.appendBytes(packet.readByteArray())
                 }
             }
+            outputPath
         }
 }

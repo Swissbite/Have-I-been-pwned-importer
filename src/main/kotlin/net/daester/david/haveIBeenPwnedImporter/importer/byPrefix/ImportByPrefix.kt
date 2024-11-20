@@ -102,6 +102,8 @@ class ImportByPrefix(
         )
     private val maxCoroutineFn = systemProcesses * 20
 
+    private val defaultCapacity: Int = systemProcesses * 1000
+
     init {
         logger.info {
             "Setup import by prefix. " +
@@ -168,7 +170,7 @@ class ImportByPrefix(
 
     private fun CoroutineScope.extractFileContent(fileChannel: ReceiveChannel<Path>): ReceiveChannel<PrefixWithHashes> =
         produce(
-            capacity = systemProcesses,
+            capacity = defaultCapacity,
         ) {
             for (path in fileChannel) {
                 logger.trace { "START: extractFileContent for ${path.fileName}" }
