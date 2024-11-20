@@ -96,18 +96,19 @@ object Downloader {
         prefix: String,
         client: HttpClient,
     ): Path =
-        client.prepareGet("https://api.pwnedpasswords.com/range/$prefix").execute { response ->
-            val outputPath = path.resolve("$prefix.txt")
-
-            val channel = response.bodyAsChannel()
+        path.resolve("$prefix.txt").let { outputPath ->
             outputPath.deleteIfExists()
-            outputPath.createFile()
-            while (!channel.isClosedForRead) {
-                val packet = channel.readRemaining(DEFAULT_BUFFER_SIZE.toLong())
-                while (!packet.exhausted()) {
-                    outputPath.appendBytes(packet.readByteArray())
+            client.prepareGet("https://api.pwnedpasswords.com/range/$prefix").execute { response ->
+                val channel = response.bodyAsChannel()
+                outputPath.createFile()
+                while (!channel.isClosedForRead) {
+                    val packet = channel.readRemaining(DEFAULT_BUFFER_SIZE.toLong())
+                    while (!packet.exhausted()) {
+                        outputPath.appendBytes(packet.readByteArray())
+                    }
                 }
+                outputPath
             }
-            outputPath
         }
+
 }
