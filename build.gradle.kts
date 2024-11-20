@@ -22,7 +22,7 @@ val logbackVersion = "1.5.12"
 plugins {
     kotlin("jvm") version "2.0.21"
     application
-    id("com.github.johnrengelman.shadow") version "8.1.1"
+    id("com.gradleup.shadow") version "8.3.5"
     id("org.jlleitschuh.gradle.ktlint") version "12.1.1"
     id("com.github.ben-manes.versions") version "0.51.0"
 }
