@@ -31,14 +31,14 @@ import com.mongodb.client.model.UpdateOneModel
 import com.mongodb.client.model.Updates
 import com.mongodb.kotlin.client.coroutine.MongoCollection
 import com.mongodb.kotlin.client.coroutine.MongoDatabase
+import io.github.oshai.kotlinlogging.KLogger
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.produce
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
-import mu.KLogger
-import mu.KotlinLogging
 import net.daester.david.haveIBeenPwnedImporter.Status
 import org.bson.BsonDocument
 import org.bson.BsonElement
@@ -57,6 +57,8 @@ class ImportByRecord(
     private val prefixIndex = IndexModel(BsonDocument(listOf(BsonElement(HashWithOccurrence::prefix.name, BsonInt32(1)))))
     private val occurrenceIndex = IndexModel(BsonDocument(listOf(BsonElement(HashWithOccurrence::occurrence.name, BsonInt32(-1)))))
     private val maxCoroutineFn = systemProcesses * 20
+
+    private val defaultCapacity: Int = maxCoroutineFn * 1000
 
     init {
         logger.info {
@@ -85,7 +87,7 @@ class ImportByRecord(
 
     private fun CoroutineScope.extractFileContent(fileChannel: ReceiveChannel<Path>): ReceiveChannel<Pair<Prefix, Map<Hash, Int>>> =
         produce(
-            capacity = systemProcesses,
+            capacity = defaultCapacity,
         ) {
             for (path in fileChannel) {
                 logger.trace { "START: extractFileContent for ${path.fileName}" }
@@ -106,7 +108,7 @@ class ImportByRecord(
         fileContent: ReceiveChannel<Pair<Prefix, Map<Hash, Int>>>,
         dataSourceCollection: MongoCollection<HashWithOccurrence>,
     ): ReceiveChannel<ChangeObject> =
-        produce(capacity = systemProcesses) {
+        produce(capacity = defaultCapacity) {
             for ((prefix, data) in fileContent) {
                 logger.trace { "START: calculate upsert for prefix $prefix" }
                 val toDelete = mutableListOf<HashWithOccurrence>()

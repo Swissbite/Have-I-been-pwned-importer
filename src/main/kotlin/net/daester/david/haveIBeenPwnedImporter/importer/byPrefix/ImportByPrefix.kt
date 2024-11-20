@@ -25,17 +25,24 @@ import com.mongodb.client.model.IndexModel
 import com.mongodb.client.model.ReturnDocument
 import com.mongodb.kotlin.client.coroutine.MongoCollection
 import com.mongodb.kotlin.client.coroutine.MongoDatabase
+import io.github.oshai.kotlinlogging.KLogger
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.produce
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.zip
 import kotlinx.coroutines.launch
-import mu.KLogger
-import mu.KotlinLogging
+import kotlinx.coroutines.runBlocking
 import net.daester.david.haveIBeenPwnedImporter.Status
 import org.bson.BsonDocument
 import org.bson.BsonElement
@@ -53,19 +60,49 @@ class ImportByPrefix(
     prefixCollectionName: String = "prefixes",
     private val systemProcesses: Int = Runtime.getRuntime().availableProcessors(),
 ) {
-    private val logger: KLogger = KotlinLogging.logger { }
-    private val prefixCollection: MongoCollection<PrefixWithHashes> = database.getCollection<PrefixWithHashes>(prefixCollectionName)
-    private val prefixIndex = IndexModel(BsonDocument(listOf(BsonElement(PrefixWithHashes::prefix.name, BsonInt32(1)))))
-    private val totalOccurrenceIndex = IndexModel(BsonDocument(listOf(BsonElement(PrefixWithHashes::totalOccurrences.name, BsonInt32(-1)))))
+    private val logger: KLogger = KotlinLogging.logger {}
+    private val prefixCollection: MongoCollection<PrefixWithHashes> =
+        database.getCollection<PrefixWithHashes>(prefixCollectionName)
+    private val prefixIndex =
+        IndexModel(
+            BsonDocument(listOf(BsonElement(PrefixWithHashes::prefix.name, BsonInt32(1)))),
+        )
+    private val totalOccurrenceIndex =
+        IndexModel(
+            BsonDocument(
+                listOf(
+                    BsonElement(
+                        PrefixWithHashes::totalOccurrences.name,
+                        BsonInt32(-1),
+                    ),
+                ),
+            ),
+        )
     private val maxHashOccurrenceIndex =
         IndexModel(
-            BsonDocument(listOf(BsonElement("${PrefixWithHashes::maxHash.name}.${HashWithOccurrence::occurrence.name}", BsonInt32(1)))),
+            BsonDocument(
+                listOf(
+                    BsonElement(
+                        "${PrefixWithHashes::maxHash.name}.${HashWithOccurrence::occurrence.name}",
+                        BsonInt32(1),
+                    ),
+                ),
+            ),
         )
     private val minHashOccurrenceIndex =
         IndexModel(
-            BsonDocument(listOf(BsonElement("${PrefixWithHashes::minHash.name}.${HashWithOccurrence::occurrence.name}", BsonInt32(1)))),
+            BsonDocument(
+                listOf(
+                    BsonElement(
+                        "${PrefixWithHashes::minHash.name}.${HashWithOccurrence::occurrence.name}",
+                        BsonInt32(1),
+                    ),
+                ),
+            ),
         )
     private val maxCoroutineFn = systemProcesses * 20
+
+    private val defaultCapacity: Int = systemProcesses * 1000
 
     init {
         logger.info {
@@ -74,6 +111,7 @@ class ImportByPrefix(
                 ", collection:$prefixCollectionName" +
                 ", systemProcesses:$systemProcesses"
         }
+        runBlocking { createMandatoryIndexes() }
     }
 
     /**
@@ -82,34 +120,63 @@ class ImportByPrefix(
      * @param scope Needed [CoroutineScope] to launch multiple [Job]s within this suspended function
      * @see ImportByPrefix
      */
-    suspend fun processHashFiles(
+    fun processHashFiles(
         fileChannel: ReceiveChannel<Path>,
         scope: CoroutineScope,
     ) {
-        prefixCollection.createIndexes(listOf(prefixIndex, totalOccurrenceIndex, maxHashOccurrenceIndex, minHashOccurrenceIndex)).collect()
         val dataToProcess = scope.extractFileContent(fileChannel)
-        repeat(maxCoroutineFn) {
-            scope.launch {
-                upsertInDb(dataToProcess, prefixCollection)
-            }
-        }
+        repeat(maxCoroutineFn) { scope.launch { upsertInDb(dataToProcess, prefixCollection) } }
     }
+
+    suspend fun processHashFiles(filesFlow: Flow<Path>) {
+        filesFlow.extractFileContent().onEach { data -> upsertInDb(data, prefixCollection) }
+    }
+
+    private suspend fun createMandatoryIndexes() {
+        prefixCollection
+            .createIndexes(
+                listOf(
+                    prefixIndex,
+                    totalOccurrenceIndex,
+                    maxHashOccurrenceIndex,
+                    minHashOccurrenceIndex,
+                ),
+            )
+            .collect()
+    }
+
+    private suspend fun Flow<Path>.extractFileContent(): Flow<PrefixWithHashes> =
+        map { path ->
+            logger.trace { "START: extractFileContent for ${path.fileName}" }
+            val prefix = path.fileName.toString().split(".")[0]
+            flowOf(extractListOfHashes(path))
+                .zip(flowOf(calculateChecksum(path))) { hashes, checksum ->
+                    PrefixWithHashes(
+                        prefix = prefix,
+                        hashes = hashes,
+                        totalOccurrences = hashes.sumOf { it.occurrence },
+                        minHash = hashes.minBy { it.occurrence },
+                        maxHash = hashes.maxBy { it.occurrence },
+                        checksum = checksum,
+                    )
+                }
+                .first()
+                .also { prefixWithHashes ->
+                    status.increaseFilesRead()
+                    status.increaseTotalHashes(prefixWithHashes.hashes.size)
+                    logger.trace { "END: extractFileContent for ${path.fileName}" }
+                }
+        }
 
     private fun CoroutineScope.extractFileContent(fileChannel: ReceiveChannel<Path>): ReceiveChannel<PrefixWithHashes> =
         produce(
-            capacity = systemProcesses,
+            capacity = defaultCapacity,
         ) {
             for (path in fileChannel) {
                 logger.trace { "START: extractFileContent for ${path.fileName}" }
                 val prefix = path.fileName.toString().split(".")[0]
-                val hashesAsync =
-                    async {
-                        extractListOfHashes(path)
-                    }
-                val checksumAsync =
-                    async {
-                        calculateChecksum(path)
-                    }
+                val hashesAsync = async { extractListOfHashes(path) }
+                val checksumAsync = async { calculateChecksum(path) }
                 val hashes = hashesAsync.await()
                 val checksum = checksumAsync.await()
 
@@ -117,10 +184,7 @@ class ImportByPrefix(
                     PrefixWithHashes(
                         prefix = prefix,
                         hashes = hashes,
-                        totalOccurrences =
-                            hashes.sumOf {
-                                it.occurrence
-                            },
+                        totalOccurrences = hashes.sumOf { it.occurrence },
                         minHash = hashes.minBy { it.occurrence },
                         maxHash = hashes.maxBy { it.occurrence },
                         checksum = checksum,
@@ -147,40 +211,54 @@ class ImportByPrefix(
     }
 
     private suspend fun upsertInDb(
+        dataObject: PrefixWithHashes,
+        prefixCollection: MongoCollection<PrefixWithHashes>,
+    ) {
+        val result =
+            prefixCollection
+                .withDocumentClass<JustPrefixAndChecksum>()
+                .find(
+                    eq(PrefixWithHashes::prefix.name, dataObject.prefix),
+                )
+                .firstOrNull()
+        when (result) {
+            null -> {
+                prefixCollection.insertOne(dataObject)
+                status.increaseInsertedHashes(dataObject.hashes.size)
+            }
+            JustPrefixAndChecksum(dataObject.prefix, dataObject.checksum) ->
+                status.increaseValidatedHashes(dataObject.hashes.size)
+            else -> {
+                val beforeReplace =
+                    prefixCollection.findOneAndReplace(
+                        eq(PrefixWithHashes::prefix.name, dataObject.prefix),
+                        dataObject,
+                        options =
+                            FindOneAndReplaceOptions()
+                                .returnDocument(ReturnDocument.BEFORE),
+                    )
+                val beforeSize = beforeReplace?.hashes?.size ?: 0
+                val updateSize = dataObject.hashes.size
+
+                val inserted = max(updateSize - beforeSize, 0)
+                // Yes, this is not accurate. A replacement of hashes (AAA deleted, BBB added) is
+                // not correct calculated
+                val deleted = max(beforeSize - updateSize, 0)
+                val updated = min(beforeSize, updateSize)
+
+                status.increaseInsertedHashes(inserted)
+                status.increaseUpdatedHashes(updated)
+                status.increaseDeletedHashes(deleted)
+            }
+        }
+    }
+
+    private suspend fun upsertInDb(
         dataObjects: ReceiveChannel<PrefixWithHashes>,
         prefixCollection: MongoCollection<PrefixWithHashes>,
     ) {
         for (dataObject in dataObjects) {
-            val result =
-                prefixCollection.withDocumentClass<JustPrefixAndChecksum>().find(
-                    eq(PrefixWithHashes::prefix.name, dataObject.prefix),
-                ).firstOrNull()
-            when (result) {
-                null -> {
-                    prefixCollection.insertOne(dataObject)
-                    status.increaseInsertedHashes(dataObject.hashes.size)
-                }
-                JustPrefixAndChecksum(dataObject.prefix, dataObject.checksum) -> status.increaseValidatedHashes(dataObject.hashes.size)
-                else -> {
-                    val beforeReplace =
-                        prefixCollection.findOneAndReplace(
-                            eq(PrefixWithHashes::prefix.name, dataObject.prefix),
-                            dataObject,
-                            options = FindOneAndReplaceOptions().returnDocument(ReturnDocument.BEFORE),
-                        )
-                    val beforeSize = beforeReplace?.hashes?.size ?: 0
-                    val updateSize = dataObject.hashes.size
-
-                    val inserted = max(updateSize - beforeSize, 0)
-                    // Yes, this is not accurate. A replacement of hashes (AAA deleted, BBB added) is not correct calculated
-                    val deleted = max(beforeSize - updateSize, 0)
-                    val updated = min(beforeSize, updateSize)
-
-                    status.increaseInsertedHashes(inserted)
-                    status.increaseUpdatedHashes(updated)
-                    status.increaseDeletedHashes(deleted)
-                }
-            }
+            upsertInDb(dataObject, prefixCollection)
         }
     }
 }
@@ -188,6 +266,7 @@ class ImportByPrefix(
 data class JustPrefixAndChecksum(val prefix: Prefix, val checksum: String)
 
 typealias Prefix = String
+
 typealias Suffix = String
 
 data class PrefixWithHashes(
