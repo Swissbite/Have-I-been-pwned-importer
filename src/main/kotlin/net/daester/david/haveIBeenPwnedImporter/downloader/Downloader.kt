@@ -27,6 +27,7 @@ import io.ktor.client.statement.bodyAsChannel
 import io.ktor.utils.io.readRemaining
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -70,7 +71,7 @@ object Downloader {
         path: Path,
         client: HttpClient = defaultClient,
     ): ReceiveChannel<Path> =
-        produce(capacity = Int.MAX_VALUE) {
+        produce(capacity = Int.MAX_VALUE, context = Dispatchers.IO) {
             hexSquareRange.map { firstPartOfPrefix ->
                 async(start = CoroutineStart.LAZY) {
                     hexCubicRange.map { secondPartOfPrefix ->
@@ -110,5 +111,4 @@ object Downloader {
                 outputPath
             }
         }
-
 }

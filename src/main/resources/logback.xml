@@ -12,6 +12,7 @@
     </appender>
 
     <logger name="net.daester.david.haveIBeenPwnedImporter" level="info" />
+    <logger name="net.daester.david.haveIBeenPwnedImporter.importer" level="info" />
     <root level="info">
         <appender-ref ref="STDOUT"/>
     </root>

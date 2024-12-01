@@ -21,44 +21,43 @@
 
 package net.daester.david.haveIBeenPwnedImporter.importer.byRecord
 
-import com.mongodb.client.model.BulkWriteOptions
-import com.mongodb.client.model.DeleteOneModel
 import com.mongodb.client.model.Filters.and
 import com.mongodb.client.model.Filters.eq
+import com.mongodb.client.model.Filters.ne
 import com.mongodb.client.model.IndexModel
-import com.mongodb.client.model.InsertOneModel
-import com.mongodb.client.model.UpdateOneModel
-import com.mongodb.client.model.Updates
 import com.mongodb.kotlin.client.coroutine.MongoCollection
 import com.mongodb.kotlin.client.coroutine.MongoDatabase
 import io.github.oshai.kotlinlogging.KLogger
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.ReceiveChannel
-import kotlinx.coroutines.channels.produce
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import net.daester.david.haveIBeenPwnedImporter.Status
+import net.daester.david.haveIBeenPwnedImporter.StatusObject
+import net.daester.david.haveIBeenPwnedImporter.file.FileData
+import net.daester.david.haveIBeenPwnedImporter.systemProcesses
 import org.bson.BsonDocument
 import org.bson.BsonElement
 import org.bson.BsonInt32
-import java.nio.file.Path
 import java.time.LocalDateTime
+import kotlin.math.abs
 
 class ImportByRecord(
-    private val status: Status,
+    private val status: Status = StatusObject,
     database: MongoDatabase,
     hashesCollectionName: String = "hashes",
-    private val systemProcesses: Int = Runtime.getRuntime().availableProcessors(),
 ) {
     private val logger: KLogger = KotlinLogging.logger { }
     private val hashCollection: MongoCollection<HashWithOccurrence> = database.getCollection<HashWithOccurrence>(hashesCollectionName)
-    private val prefixIndex = IndexModel(BsonDocument(listOf(BsonElement(HashWithOccurrence::prefix.name, BsonInt32(1)))))
-    private val occurrenceIndex = IndexModel(BsonDocument(listOf(BsonElement(HashWithOccurrence::occurrence.name, BsonInt32(-1)))))
-    private val maxCoroutineFn = systemProcesses * 20
-
-    private val defaultCapacity: Int = maxCoroutineFn * 1000
+    private val prefixIndex = IndexModel(BsonDocument(listOf(BsonElement(HashWithOccurrence.prefixFieldName, BsonInt32(1)))))
+    private val occurrenceIndex = IndexModel(BsonDocument(listOf(BsonElement(HashWithOccurrence.occurrenceFieldName, BsonInt32(-1)))))
+    private val fileRecordChecksum =
+        IndexModel(BsonDocument(listOf(BsonElement(HashWithOccurrence.fileRecordChecksumFieldName, BsonInt32(1)))))
 
     init {
         logger.info {
@@ -67,105 +66,81 @@ class ImportByRecord(
                 ", collection:$hashesCollectionName" +
                 ", systemProcesses:$systemProcesses"
         }
+
+        runBlocking {
+            launch {
+                hashCollection.createIndexes(listOf(prefixIndex, occurrenceIndex, fileRecordChecksum)).collect()
+            }
+        }
     }
 
     suspend fun processHashFiles(
-        fileChannel: ReceiveChannel<Path>,
+        fileChannel: ReceiveChannel<FileData>,
         scope: CoroutineScope,
     ) {
-        hashCollection.createIndexes(listOf(prefixIndex, occurrenceIndex)).collect()
-        val dataToProcess = scope.extractFileContent(fileChannel)
-        val entriesToUpsert =
-            scope.calculateNeededUpsertDataObjects(
-                dataToProcess,
-                hashCollection,
-            )
-        repeat(maxCoroutineFn) {
-            scope.upsertHashes(entriesToUpsert, hashCollection)
-        }
-    }
-
-    private fun CoroutineScope.extractFileContent(fileChannel: ReceiveChannel<Path>): ReceiveChannel<Pair<Prefix, Map<Hash, Int>>> =
-        produce(
-            capacity = defaultCapacity,
-        ) {
-            for (path in fileChannel) {
-                logger.trace { "START: extractFileContent for ${path.fileName}" }
-                val prefix = path.fileName.toString().split(".")[0]
-                send(
-                    prefix to
-                        path.toFile().readLines().associate { line ->
-                            val (suffix, amount) = line.split(":")
-                            "$prefix$suffix" to amount.toInt(10)
-                        },
-                )
-                status.increaseFilesRead()
-                logger.trace { "END: extractFileContent for ${path.fileName}" }
-            }
-        }
-
-    private fun CoroutineScope.calculateNeededUpsertDataObjects(
-        fileContent: ReceiveChannel<Pair<Prefix, Map<Hash, Int>>>,
-        dataSourceCollection: MongoCollection<HashWithOccurrence>,
-    ): ReceiveChannel<ChangeObject> =
-        produce(capacity = defaultCapacity) {
-            for ((prefix, data) in fileContent) {
-                logger.trace { "START: calculate upsert for prefix $prefix" }
-                val toDelete = mutableListOf<HashWithOccurrence>()
-                val toUpdate = mutableListOf<HashWithOccurrence>()
-                val toInsert = mutableListOf<HashWithOccurrence>()
-                val visitedHashes = mutableSetOf<Hash>()
-                dataSourceCollection.find(eq(HashWithOccurrence::prefix.name, prefix)).collect {
-                    val occurrence = data[it.hash]
-                    when {
-                        occurrence == null -> if (it.occurrence > 0) toDelete.add(it.copy(occurrence = 0))
-                        occurrence != it.occurrence -> toUpdate.add(it.copy(occurrence = occurrence, lastUpdate = LocalDateTime.now()))
-                    }
-                    visitedHashes.add(it.hash)
-                }
-                data.entries.filterNot { visitedHashes.contains(it.key) }.forEach {
-                    toInsert.add(HashWithOccurrence(prefix = prefix, hash = it.key, occurrence = it.value))
-                }
-                if (toDelete.isNotEmpty() || toUpdate.isNotEmpty() || toInsert.isNotEmpty()) {
-                    send(ChangeObject(toDelete = toDelete.toList(), toInsert = toInsert.toList(), toUpdate = toUpdate.toList()))
-                }
-                status.increaseTotalHashes(data.size)
-
-                status.increaseValidatedHashes(data.size - toDelete.size - toUpdate.size - toInsert.size)
-                logger.trace { "END: calculate upsert for prefix $prefix" }
-            }
-        }
-
-    private fun CoroutineScope.upsertHashes(
-        dataObjectsToUpsertInBulk: ReceiveChannel<ChangeObject>,
-        collection: MongoCollection<HashWithOccurrence>,
-    ) = launch {
-        for (hashesWithOccurrence in dataObjectsToUpsertInBulk) {
-            val toDelete =
-                hashesWithOccurrence.toDelete.map {
-                    DeleteOneModel<HashWithOccurrence>(
-                        and(eq(HashWithOccurrence::prefix.name, it.prefix), eq(HashWithOccurrence::hash.name, it.hash)),
-                    )
-                }
-            val toInsert = hashesWithOccurrence.toInsert.map { InsertOneModel(it) }
-            val toUpdate =
-                hashesWithOccurrence.toUpdate.map {
-                    UpdateOneModel<HashWithOccurrence>(
-                        and(eq(HashWithOccurrence::prefix.name, it.prefix), eq(HashWithOccurrence::hash.name, it.hash)),
-                        listOf(
-                            Updates.set(HashWithOccurrence::occurrence.name, it.occurrence),
-                            Updates.set(HashWithOccurrence::lastUpdate.name, it.lastUpdate),
+        logger.trace { "HEY! I'M STARTING!" }
+        for (fileData in fileChannel) {
+            val entriesCount =
+                scope.async(Dispatchers.IO) {
+                    logger.trace { "Counting entries for ${fileData.prefix} ${fileData.checksum}" }
+                    hashCollection.countDocuments(
+                        and(
+                            eq(
+                                HashWithOccurrence.prefixFieldName,
+                                fileData.prefix,
+                            ),
+                            eq(HashWithOccurrence.fileRecordChecksumFieldName, fileData.checksum),
                         ),
                     )
                 }
+            val deleted =
+                scope.async(Dispatchers.IO) {
+                    logger.trace { "Deleting entries for ${fileData.prefix} with checksum not equal ${fileData.checksum}" }
+                    hashCollection.deleteMany(
+                        and(
+                            eq(HashWithOccurrence.prefixFieldName, fileData.prefix),
+                            ne(HashWithOccurrence.fileRecordChecksumFieldName, fileData.checksum),
+                        ),
+                    ).deletedCount
+                }
 
-            collection.bulkWrite(
-                toDelete + toInsert + toUpdate,
-                BulkWriteOptions().ordered(false),
-            )
-            status.increaseDeletedHashes(toDelete.size)
-            status.increaseInsertedHashes(toInsert.size)
-            status.increaseUpdatedHashes(toUpdate.size)
+            if (fileData.hashesWithOccurrence.size.toLong() == entriesCount.await()) {
+                status.increaseValidatedHashes(fileData.hashesWithOccurrence.size)
+                status.increaseDeletedHashes(deleted.await().toInt())
+                status.increaseTotalHashes(fileData.hashesWithOccurrence.size)
+            } else {
+                // Either a previous update did not complete, or the hash changed. For simplicity, we'll just drop existing and re-insert all of a file.
+                val prepareBulkInsert =
+                    scope.async(Dispatchers.Default) {
+                        fileData.hashesWithOccurrence.map {
+                            HashWithOccurrence(
+                                prefix = fileData.prefix,
+                                hash = it.suffix,
+                                occurrence = it.occurrence,
+                                fileRecordChecksum = fileData.checksum,
+                            )
+                        }
+                    }
+                val deletedExisting =
+                    hashCollection.deleteMany(
+                        eq(
+                            HashWithOccurrence.prefixFieldName,
+                            fileData.prefix,
+                        ),
+                    ).deletedCount
+
+
+                status.increaseTotalHashes(prepareBulkInsert.await().size)
+                hashCollection.insertMany(prepareBulkInsert.await()).wasAcknowledged()
+
+                val inserted = abs(fileData.hashesWithOccurrence.size - deletedExisting)
+                val updated = abs(fileData.hashesWithOccurrence.size - inserted)
+                val deltaDeleteExisting = abs(deletedExisting - updated)
+
+                status.increaseDeletedHashes(deleted.await().toInt() + deltaDeleteExisting.toInt())
+                status.increaseInsertedHashes(inserted.toInt())
+                status.increaseUpdatedHashes(updated.toInt())
+            }
         }
     }
 }
@@ -178,7 +153,16 @@ data class HashWithOccurrence(
     val prefix: Prefix,
     val occurrence: Int,
     val lastUpdate: LocalDateTime? = LocalDateTime.now(),
-)
+    val fileRecordChecksum: String,
+) {
+    companion object {
+        val prefixFieldName = HashWithOccurrence::prefix.name
+        val hashFieldName = HashWithOccurrence::hash.name
+        val occurrenceFieldName = HashWithOccurrence::occurrence.name
+        val lastUpdateFieldName = HashWithOccurrence::lastUpdate.name
+        val fileRecordChecksumFieldName = HashWithOccurrence::fileRecordChecksum.name
+    }
+}
 
 data class ChangeObject(
     val toInsert: List<HashWithOccurrence>,

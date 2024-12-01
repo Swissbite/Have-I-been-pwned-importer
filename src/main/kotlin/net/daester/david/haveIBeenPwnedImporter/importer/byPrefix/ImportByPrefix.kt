@@ -28,27 +28,23 @@ import com.mongodb.kotlin.client.coroutine.MongoDatabase
 import io.github.oshai.kotlinlogging.KLogger
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.produce
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.zip
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import net.daester.david.haveIBeenPwnedImporter.Status
+import net.daester.david.haveIBeenPwnedImporter.defaultChannelCapacity
+import net.daester.david.haveIBeenPwnedImporter.file.FileData
+import net.daester.david.haveIBeenPwnedImporter.systemProcesses
 import org.bson.BsonDocument
 import org.bson.BsonElement
 import org.bson.BsonInt32
-import java.nio.file.Path
-import java.security.MessageDigest
 import java.time.LocalDate
 import kotlin.math.max
 import kotlin.math.min
@@ -58,21 +54,20 @@ class ImportByPrefix(
     private val status: Status,
     database: MongoDatabase,
     prefixCollectionName: String = "prefixes",
-    private val systemProcesses: Int = Runtime.getRuntime().availableProcessors(),
 ) {
     private val logger: KLogger = KotlinLogging.logger {}
     private val prefixCollection: MongoCollection<PrefixWithHashes> =
         database.getCollection<PrefixWithHashes>(prefixCollectionName)
     private val prefixIndex =
         IndexModel(
-            BsonDocument(listOf(BsonElement(PrefixWithHashes::prefix.name, BsonInt32(1)))),
+            BsonDocument(listOf(BsonElement(PrefixWithHashes.prefixFieldName, BsonInt32(1)))),
         )
     private val totalOccurrenceIndex =
         IndexModel(
             BsonDocument(
                 listOf(
                     BsonElement(
-                        PrefixWithHashes::totalOccurrences.name,
+                        HashWithOccurrence.occurrenceFieldName,
                         BsonInt32(-1),
                     ),
                 ),
@@ -83,7 +78,7 @@ class ImportByPrefix(
             BsonDocument(
                 listOf(
                     BsonElement(
-                        "${PrefixWithHashes::maxHash.name}.${HashWithOccurrence::occurrence.name}",
+                        "${PrefixWithHashes.maxHashFieldName}.${HashWithOccurrence.occurrenceFieldName}",
                         BsonInt32(1),
                     ),
                 ),
@@ -94,15 +89,19 @@ class ImportByPrefix(
             BsonDocument(
                 listOf(
                     BsonElement(
-                        "${PrefixWithHashes::minHash.name}.${HashWithOccurrence::occurrence.name}",
+                        "${PrefixWithHashes.minHashFieldName}.${HashWithOccurrence.occurrenceFieldName}",
                         BsonInt32(1),
                     ),
                 ),
             ),
         )
+    private val lastUpdatedIndex =
+        IndexModel(
+            BsonDocument(
+                listOf(BsonElement(PrefixWithHashes.lastUpdatedFieldName, BsonInt32(-1))),
+            ),
+        )
     private val maxCoroutineFn = systemProcesses * 20
-
-    private val defaultCapacity: Int = systemProcesses * 1000
 
     init {
         logger.info {
@@ -121,15 +120,11 @@ class ImportByPrefix(
      * @see ImportByPrefix
      */
     fun processHashFiles(
-        fileChannel: ReceiveChannel<Path>,
+        fileChannel: ReceiveChannel<FileData>,
         scope: CoroutineScope,
     ) {
         val dataToProcess = scope.extractFileContent(fileChannel)
-        repeat(maxCoroutineFn) { scope.launch { upsertInDb(dataToProcess, prefixCollection) } }
-    }
-
-    suspend fun processHashFiles(filesFlow: Flow<Path>) {
-        filesFlow.extractFileContent().onEach { data -> upsertInDb(data, prefixCollection) }
+        repeat(maxCoroutineFn) { scope.launch(context = Dispatchers.IO) { upsertInDb(dataToProcess, prefixCollection) } }
     }
 
     private suspend fun createMandatoryIndexes() {
@@ -140,75 +135,36 @@ class ImportByPrefix(
                     totalOccurrenceIndex,
                     maxHashOccurrenceIndex,
                     minHashOccurrenceIndex,
+                    lastUpdatedIndex,
                 ),
             )
             .collect()
     }
 
-    private suspend fun Flow<Path>.extractFileContent(): Flow<PrefixWithHashes> =
-        map { path ->
-            logger.trace { "START: extractFileContent for ${path.fileName}" }
-            val prefix = path.fileName.toString().split(".")[0]
-            flowOf(extractListOfHashes(path))
-                .zip(flowOf(calculateChecksum(path))) { hashes, checksum ->
-                    PrefixWithHashes(
-                        prefix = prefix,
-                        hashes = hashes,
-                        totalOccurrences = hashes.sumOf { it.occurrence },
-                        minHash = hashes.minBy { it.occurrence },
-                        maxHash = hashes.maxBy { it.occurrence },
-                        checksum = checksum,
-                    )
-                }
-                .first()
-                .also { prefixWithHashes ->
-                    status.increaseFilesRead()
-                    status.increaseTotalHashes(prefixWithHashes.hashes.size)
-                    logger.trace { "END: extractFileContent for ${path.fileName}" }
-                }
-        }
-
-    private fun CoroutineScope.extractFileContent(fileChannel: ReceiveChannel<Path>): ReceiveChannel<PrefixWithHashes> =
+    private fun CoroutineScope.extractFileContent(fileChannel: ReceiveChannel<FileData>): ReceiveChannel<PrefixWithHashes> =
         produce(
-            capacity = defaultCapacity,
+            capacity = defaultChannelCapacity,
         ) {
-            for (path in fileChannel) {
-                logger.trace { "START: extractFileContent for ${path.fileName}" }
-                val prefix = path.fileName.toString().split(".")[0]
-                val hashesAsync = async { extractListOfHashes(path) }
-                val checksumAsync = async { calculateChecksum(path) }
-                val hashes = hashesAsync.await()
-                val checksum = checksumAsync.await()
-
+            for (fileData in fileChannel) {
+                val total = async { fileData.hashesWithOccurrence.sumOf { it.occurrence.toLong() } }
+                val minHash =
+                    async { fileData.hashesWithOccurrence.minBy { it.occurrence }.let { HashWithOccurrence(it.suffix, it.occurrence) } }
+                val maxHash =
+                    async { fileData.hashesWithOccurrence.maxBy { it.occurrence }.let { HashWithOccurrence(it.suffix, it.occurrence) } }
+                val hashes = async { fileData.hashesWithOccurrence.map { HashWithOccurrence(it.suffix, it.occurrence) } }
                 send(
                     PrefixWithHashes(
-                        prefix = prefix,
-                        hashes = hashes,
-                        totalOccurrences = hashes.sumOf { it.occurrence },
-                        minHash = hashes.minBy { it.occurrence },
-                        maxHash = hashes.maxBy { it.occurrence },
-                        checksum = checksum,
+                        prefix = fileData.prefix,
+                        hashes = hashes.await(),
+                        totalOccurrences = total.await(),
+                        minHash = minHash.await(),
+                        maxHash = maxHash.await(),
+                        checksum = fileData.checksum,
                     ),
                 )
-
-                status.increaseFilesRead()
-                status.increaseTotalHashes(hashes.size)
-                logger.trace { "END: extractFileContent for ${path.fileName}" }
+                status.increaseTotalHashes(fileData.hashesWithOccurrence.size)
             }
         }
-
-    private fun extractListOfHashes(path: Path): List<HashWithOccurrence> =
-        path.toFile().readLines().map { line ->
-            val (suffix, amount) = line.split(":")
-            HashWithOccurrence(suffix = suffix, occurrence = amount.toLong())
-        }
-
-    @OptIn(ExperimentalStdlibApi::class)
-    private fun calculateChecksum(path: Path): String {
-        val md = MessageDigest.getInstance("SHA-256")
-        val digest = md.digest(path.toFile().readBytes())
-        return digest.toHexString()
-    }
 
     private suspend fun upsertInDb(
         dataObject: PrefixWithHashes,
@@ -218,7 +174,7 @@ class ImportByPrefix(
             prefixCollection
                 .withDocumentClass<JustPrefixAndChecksum>()
                 .find(
-                    eq(PrefixWithHashes::prefix.name, dataObject.prefix),
+                    eq(PrefixWithHashes.prefixFieldName, dataObject.prefix),
                 )
                 .firstOrNull()
         when (result) {
@@ -231,7 +187,7 @@ class ImportByPrefix(
             else -> {
                 val beforeReplace =
                     prefixCollection.findOneAndReplace(
-                        eq(PrefixWithHashes::prefix.name, dataObject.prefix),
+                        eq(PrefixWithHashes.prefixFieldName, dataObject.prefix),
                         dataObject,
                         options =
                             FindOneAndReplaceOptions()
@@ -277,6 +233,21 @@ data class PrefixWithHashes(
     val minHash: HashWithOccurrence,
     val checksum: String,
     val lastUpdated: LocalDate = LocalDate.now(),
-)
+) {
+    companion object {
+        val prefixFieldName = PrefixWithHashes::prefix.name
+        val hashesFieldName = PrefixWithHashes::hashes.name
+        val totalOccurrencesFieldName = PrefixWithHashes::totalOccurrences.name
+        val maxHashFieldName = PrefixWithHashes::maxHash.name
+        val minHashFieldName = PrefixWithHashes::minHash.name
+        val checksumFieldName = PrefixWithHashes::checksum.name
+        val lastUpdatedFieldName = PrefixWithHashes::lastUpdated.name
+    }
+}
 
-data class HashWithOccurrence(val suffix: Suffix, val occurrence: Long)
+data class HashWithOccurrence(val suffix: Suffix, val occurrence: Int) {
+    companion object {
+        val suffixFieldName = HashWithOccurrence::suffix.name
+        val occurrenceFieldName = HashWithOccurrence::occurrence.name
+    }
+}

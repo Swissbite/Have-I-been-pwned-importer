@@ -31,32 +31,25 @@ import com.mongodb.kotlin.client.coroutine.MongoClient
 import com.mongodb.kotlin.client.coroutine.MongoDatabase
 import io.github.oshai.kotlinlogging.KLogger
 import io.github.oshai.kotlinlogging.KotlinLogging
+import io.ktor.utils.io.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.buffer
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.produceIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import net.daester.david.haveIBeenPwnedImporter.downloader.Downloader.downloadToPath
+import net.daester.david.haveIBeenPwnedImporter.file.FileData
+import net.daester.david.haveIBeenPwnedImporter.file.produceAllFilePaths
+import net.daester.david.haveIBeenPwnedImporter.file.produceFileData
 import net.daester.david.haveIBeenPwnedImporter.importer.byPrefix.ImportByPrefix
 import net.daester.david.haveIBeenPwnedImporter.importer.byRecord.ImportByRecord
+import sun.misc.Signal
 import java.nio.file.Path
-import java.text.DecimalFormat
-import java.text.DecimalFormatSymbols
-import java.util.Locale
-import kotlin.streams.asStream
-
-private val systemProcesses = Runtime.getRuntime().availableProcessors()
 
 private val logger: KLogger = KotlinLogging.logger { }
-
-private val swissGermanLocale: Locale = Locale.of("gsw")
-
-fun formatter(n: Int): String = DecimalFormat("#,###", DecimalFormatSymbols(swissGermanLocale)).format(n)
 
 enum class StorageVariant { SINGLE, GROUPED }
 
@@ -74,26 +67,49 @@ class Importer : CliktCommand() {
         val mongoClient: MongoClient = MongoClient.create(mongoDbConnectionURL)
         val mongoDB = mongoClient.getDatabase(mongoDbDatabase)
         runBlocking {
-            launch(Dispatchers.IO) {
-                val pathsChannel =
-                    when (shouldUpdateFromInternet) {
-                        true -> downloadToPath(passwordsDirectory)
-                        false -> getAllFilePaths(passwordsDirectory)
-                    }
-                val job =
-                    when (storageVariant) {
-                        StorageVariant.SINGLE -> importByRecord(mongoDB, pathsChannel)
-                        StorageVariant.GROUPED -> importByPrefix(mongoDB, pathsChannel)
-                    }
-                logger.info {
-                    StatusObject.currentStatusLogMessage
-                }
-                while (job.isActive) {
-                    delay(1000)
+            val job =
+                launch(Dispatchers.Default) {
+                    val pathsChannel =
+                        when (shouldUpdateFromInternet) {
+                            true -> downloadToPath(passwordsDirectory)
+                            false -> produceAllFilePaths(passwordsDirectory)
+                        }
+                    val fileRead = produceFileData(pathsChannel)
+                    val job =
+                        when (storageVariant) {
+                            StorageVariant.SINGLE -> importByRecord(mongoDB, fileRead)
+                            StorageVariant.GROUPED -> importByPrefix(mongoDB, fileRead)
+                        }
                     logger.info {
                         StatusObject.currentStatusLogMessage
                     }
+                    while (job.isActive) {
+                        delay(1000)
+                        logger.info {
+                            StatusObject.currentStatusLogMessage
+                        }
+                    }
+                    while (!job.isCancelled && !job.isCompleted) {
+                        logger.info {
+                            StatusObject.currentStatusLogMessage
+                        }
+                    }
+                    logger.info {
+                        StatusObject.currentStatusLogMessage
+                    }
+                    logger.info {
+                        "Job finished. Cleaning up JVM resources."
+                    }
+                    logger.info {
+                        "Thank you. :-)"
+                    }
                 }
+            Signal.handle(Signal("INT")) {
+                logger.info {
+                    "Received INT signal. Canceling job."
+                }
+                job.cancel(CancellationException("Received INT signal. Canceling job."))
+                logger.info { "Bye :-)" }
             }
         }
     }
@@ -103,32 +119,30 @@ fun main(args: Array<String>) = Importer().main(args)
 
 private fun CoroutineScope.importByPrefix(
     mongoDB: MongoDatabase,
-    pathsChannel: ReceiveChannel<Path>,
+    fileChannel: ReceiveChannel<FileData>,
 ) = launch {
     val ibp = ImportByPrefix(status = StatusObject, database = mongoDB)
-    ibp.processHashFiles(pathsChannel, this)
+    (0..maxRepeatLaunch).map {
+        async {
+            logger.info {
+                "Starting importByPrefix process: $it"
+            }
+            ibp.processHashFiles(fileChannel, this)
+        }
+    }.awaitAll()
 }
 
 private fun CoroutineScope.importByRecord(
     mongoDB: MongoDatabase,
-    pathsChannel: ReceiveChannel<Path>,
+    fileChannel: ReceiveChannel<FileData>,
 ) = launch {
     val ibr = ImportByRecord(status = StatusObject, database = mongoDB)
-    ibr.processHashFiles(pathsChannel, this)
-}
-
-private fun getAllFilePathsAsFlow(path: Path): Flow<Path> =
-    flow {
-        logger.info { "Path: ${path.toAbsolutePath()}" }
-        val files = path.toFile().walk().maxDepth(1).asStream().parallel().filter { it.isFile }.map { it.toPath() }.iterator()
-        while (files.hasNext()) {
-            emit(files.next())
-            StatusObject.increaseFilesQueued()
-            logger.debug { StatusObject.currentStatusLogMessage }
+    (0..maxRepeatLaunch).map {
+        async {
+            logger.info {
+                "Starting importByHash process: $it"
+            }
+            ibr.processHashFiles(fileChannel, this)
         }
-    }
-
-private fun CoroutineScope.getAllFilePaths(path: Path): ReceiveChannel<Path> =
-    getAllFilePathsAsFlow(path)
-        .buffer(systemProcesses * 1000)
-        .produceIn(this)
+    }.awaitAll()
+}

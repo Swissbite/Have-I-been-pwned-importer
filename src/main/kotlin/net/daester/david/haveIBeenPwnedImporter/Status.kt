@@ -86,16 +86,16 @@ object StatusObject : Status {
     override val currentStatusLogMessage: String
         get() {
             val status = currentState.value
-            val queuedFiles = formatter(status.filesQueued)
-            val readFiles = formatter(status.filesRead)
-            val countedObjects = formatter(status.totalHashesCounter)
-            val validated = formatter(status.validatedHashesCounter)
-            val inserted = formatter(status.insertedHashesCounter)
-            val updated = formatter(status.updatedHashesCounter)
-            val deleted = formatter(status.deletedHashesCounter)
+            val queuedFiles = intFormatter(status.filesQueued)
+            val readFiles = intFormatter(status.filesRead)
+            val countedObjects = intFormatter(status.totalHashesCounter)
+            val validated = intFormatter(status.validatedHashesCounter)
+            val inserted = intFormatter(status.insertedHashesCounter)
+            val updated = intFormatter(status.updatedHashesCounter)
+            val deleted = intFormatter(status.deletedHashesCounter)
             return "Queued Files: $queuedFiles" +
                 " - Read files: $readFiles" +
-                " - Processed Objects: $countedObjects" +
+                " - DB Entries Parsed: $countedObjects" +
                 " - Validated: $validated" +
                 " - Inserted: $inserted" +
                 " - Updated: $updated" +
