@@ -20,7 +20,7 @@ val ktorVersion = "3.0.1"
 val logbackVersion = "1.5.12"
 
 plugins {
-    kotlin("jvm") version "2.0.21"
+    kotlin("jvm") version "2.1.0"
     application
     id("com.gradleup.shadow") version "8.3.5"
     id("org.jlleitschuh.gradle.ktlint") version "12.1.1"
@@ -41,7 +41,7 @@ dependencies {
     implementation("org.mongodb:mongodb-driver-kotlin-coroutine:5.2.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.7.3")
-    implementation("io.github.oshai:kotlin-logging:7.0.0")
+    implementation("io.github.oshai:kotlin-logging:7.0.3")
     implementation("org.mongodb:bson-kotlinx:5.2.0")
     implementation("org.slf4j:slf4j-api:2.0.16")
     implementation("ch.qos.logback:logback-core:$logbackVersion")
