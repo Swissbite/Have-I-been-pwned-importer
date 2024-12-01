@@ -28,6 +28,8 @@ interface Status {
 
     fun increaseFilesRead()
 
+    fun increaseFileProcessed()
+
     fun increaseValidatedHashes(increaseBy: Int = 1)
 
     fun increaseInsertedHashes(increaseBy: Int = 1)
@@ -44,6 +46,7 @@ interface Status {
 data class CurrentState(
     val filesQueued: Int = 0,
     val filesRead: Int = 0,
+    val filesProcessed: Int = 0,
     val totalHashesCounter: Int = 0,
     val validatedHashesCounter: Int = 0,
     val updatedHashesCounter: Int = 0,
@@ -56,11 +59,15 @@ object StatusObject : Status {
     private val currentState = statusCurrentStateMutable.asStateFlow()
 
     override fun increaseFilesQueued() {
-        statusCurrentStateMutable.update { state -> state.copy(filesQueued = state.filesQueued + 1) }
+        statusCurrentStateMutable.update { state -> state.copy(filesQueued = state.filesQueued.inc()) }
     }
 
     override fun increaseFilesRead() {
-        statusCurrentStateMutable.update { state -> state.copy(filesRead = state.filesRead + 1) }
+        statusCurrentStateMutable.update { state -> state.copy(filesRead = state.filesRead.inc()) }
+    }
+
+    override fun increaseFileProcessed() {
+        statusCurrentStateMutable.update { state -> state.copy(filesProcessed = state.filesProcessed.inc()) }
     }
 
     override fun increaseValidatedHashes(increaseBy: Int) {
@@ -88,6 +95,7 @@ object StatusObject : Status {
             val status = currentState.value
             val queuedFiles = intFormatter(status.filesQueued)
             val readFiles = intFormatter(status.filesRead)
+            val processedFiles = intFormatter(status.filesProcessed)
             val countedObjects = intFormatter(status.totalHashesCounter)
             val validated = intFormatter(status.validatedHashesCounter)
             val inserted = intFormatter(status.insertedHashesCounter)
@@ -95,7 +103,8 @@ object StatusObject : Status {
             val deleted = intFormatter(status.deletedHashesCounter)
             return "Queued Files: $queuedFiles" +
                 " - Read files: $readFiles" +
-                " - DB Entries Parsed: $countedObjects" +
+                " - Processed files: $processedFiles" +
+                " - Hashes Parsed: $countedObjects" +
                 " - Validated: $validated" +
                 " - Inserted: $inserted" +
                 " - Updated: $updated" +

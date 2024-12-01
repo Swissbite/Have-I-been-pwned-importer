@@ -28,18 +28,16 @@ import com.mongodb.kotlin.client.coroutine.MongoDatabase
 import io.github.oshai.kotlinlogging.KLogger
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel.Factory.BUFFERED
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.produce
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import net.daester.david.haveIBeenPwnedImporter.Status
-import net.daester.david.haveIBeenPwnedImporter.defaultChannelCapacity
 import net.daester.david.haveIBeenPwnedImporter.file.FileData
 import net.daester.david.haveIBeenPwnedImporter.systemProcesses
 import org.bson.BsonDocument
@@ -58,50 +56,6 @@ class ImportByPrefix(
     private val logger: KLogger = KotlinLogging.logger {}
     private val prefixCollection: MongoCollection<PrefixWithHashes> =
         database.getCollection<PrefixWithHashes>(prefixCollectionName)
-    private val prefixIndex =
-        IndexModel(
-            BsonDocument(listOf(BsonElement(PrefixWithHashes.prefixFieldName, BsonInt32(1)))),
-        )
-    private val totalOccurrenceIndex =
-        IndexModel(
-            BsonDocument(
-                listOf(
-                    BsonElement(
-                        HashWithOccurrence.occurrenceFieldName,
-                        BsonInt32(-1),
-                    ),
-                ),
-            ),
-        )
-    private val maxHashOccurrenceIndex =
-        IndexModel(
-            BsonDocument(
-                listOf(
-                    BsonElement(
-                        "${PrefixWithHashes.maxHashFieldName}.${HashWithOccurrence.occurrenceFieldName}",
-                        BsonInt32(1),
-                    ),
-                ),
-            ),
-        )
-    private val minHashOccurrenceIndex =
-        IndexModel(
-            BsonDocument(
-                listOf(
-                    BsonElement(
-                        "${PrefixWithHashes.minHashFieldName}.${HashWithOccurrence.occurrenceFieldName}",
-                        BsonInt32(1),
-                    ),
-                ),
-            ),
-        )
-    private val lastUpdatedIndex =
-        IndexModel(
-            BsonDocument(
-                listOf(BsonElement(PrefixWithHashes.lastUpdatedFieldName, BsonInt32(-1))),
-            ),
-        )
-    private val maxCoroutineFn = systemProcesses * 20
 
     init {
         logger.info {
@@ -163,9 +117,19 @@ class ImportByPrefix(
                         checksum = fileData.checksum,
                     ),
                 )
+                status.increaseFileProcessed()
                 status.increaseTotalHashes(fileData.hashesWithOccurrence.size)
             }
         }
+
+    private suspend fun upsertInDb(
+        dataObjects: ReceiveChannel<PrefixWithHashes>,
+        prefixCollection: MongoCollection<PrefixWithHashes>,
+    ) {
+        for (dataObject in dataObjects) {
+            upsertInDb(dataObject, prefixCollection)
+        }
+    }
 
     private suspend fun upsertInDb(
         dataObject: PrefixWithHashes,
@@ -210,13 +174,50 @@ class ImportByPrefix(
         }
     }
 
-    private suspend fun upsertInDb(
-        dataObjects: ReceiveChannel<PrefixWithHashes>,
-        prefixCollection: MongoCollection<PrefixWithHashes>,
-    ) {
-        for (dataObject in dataObjects) {
-            upsertInDb(dataObject, prefixCollection)
-        }
+    companion object {
+        private val prefixIndex =
+            IndexModel(
+                BsonDocument(listOf(BsonElement(PrefixWithHashes.prefixFieldName, BsonInt32(1)))),
+            )
+        private val totalOccurrenceIndex =
+            IndexModel(
+                BsonDocument(
+                    listOf(
+                        BsonElement(
+                            HashWithOccurrence.occurrenceFieldName,
+                            BsonInt32(-1),
+                        ),
+                    ),
+                ),
+            )
+        private val maxHashOccurrenceIndex =
+            IndexModel(
+                BsonDocument(
+                    listOf(
+                        BsonElement(
+                            "${PrefixWithHashes.maxHashFieldName}.${HashWithOccurrence.occurrenceFieldName}",
+                            BsonInt32(1),
+                        ),
+                    ),
+                ),
+            )
+        private val minHashOccurrenceIndex =
+            IndexModel(
+                BsonDocument(
+                    listOf(
+                        BsonElement(
+                            "${PrefixWithHashes.minHashFieldName}.${HashWithOccurrence.occurrenceFieldName}",
+                            BsonInt32(1),
+                        ),
+                    ),
+                ),
+            )
+        private val lastUpdatedIndex =
+            IndexModel(
+                BsonDocument(
+                    listOf(BsonElement(PrefixWithHashes.lastUpdatedFieldName, BsonInt32(-1))),
+                ),
+            )
     }
 }
 

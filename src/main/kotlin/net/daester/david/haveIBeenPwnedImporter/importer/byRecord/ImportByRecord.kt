@@ -78,8 +78,8 @@ class ImportByRecord(
         fileChannel: ReceiveChannel<FileData>,
         scope: CoroutineScope,
     ) {
-        logger.trace { "HEY! I'M STARTING!" }
         for (fileData in fileChannel) {
+            logger.trace { "Process hashes for ${fileData.prefix} with checksum ${fileData.checksum}" }
             val entriesCount =
                 scope.async(Dispatchers.IO) {
                     logger.trace { "Counting entries for ${fileData.prefix} ${fileData.checksum}" }
@@ -129,7 +129,6 @@ class ImportByRecord(
                         ),
                     ).deletedCount
 
-
                 status.increaseTotalHashes(prepareBulkInsert.await().size)
                 hashCollection.insertMany(prepareBulkInsert.await()).wasAcknowledged()
 
@@ -164,8 +163,3 @@ data class HashWithOccurrence(
     }
 }
 
-data class ChangeObject(
-    val toInsert: List<HashWithOccurrence>,
-    val toUpdate: List<HashWithOccurrence>,
-    val toDelete: List<HashWithOccurrence>,
-)
