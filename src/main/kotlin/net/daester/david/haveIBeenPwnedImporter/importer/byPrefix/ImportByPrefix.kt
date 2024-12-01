@@ -119,12 +119,12 @@ class ImportByPrefix(
      * @param scope Needed [CoroutineScope] to launch multiple [Job]s within this suspended function
      * @see ImportByPrefix
      */
-    fun processHashFiles(
+    suspend fun processHashFiles(
         fileChannel: ReceiveChannel<FileData>,
         scope: CoroutineScope,
     ) {
         val dataToProcess = scope.extractFileContent(fileChannel)
-        repeat(maxCoroutineFn) { scope.launch(context = Dispatchers.IO) { upsertInDb(dataToProcess, prefixCollection) } }
+        upsertInDb(dataToProcess, prefixCollection)
     }
 
     private suspend fun createMandatoryIndexes() {
@@ -143,9 +143,10 @@ class ImportByPrefix(
 
     private fun CoroutineScope.extractFileContent(fileChannel: ReceiveChannel<FileData>): ReceiveChannel<PrefixWithHashes> =
         produce(
-            capacity = defaultChannelCapacity,
+            capacity = BUFFERED,
         ) {
             for (fileData in fileChannel) {
+                logger.trace { "Process hashes for ${fileData.prefix} with checksum ${fileData.checksum}" }
                 val total = async { fileData.hashesWithOccurrence.sumOf { it.occurrence.toLong() } }
                 val minHash =
                     async { fileData.hashesWithOccurrence.minBy { it.occurrence }.let { HashWithOccurrence(it.suffix, it.occurrence) } }
