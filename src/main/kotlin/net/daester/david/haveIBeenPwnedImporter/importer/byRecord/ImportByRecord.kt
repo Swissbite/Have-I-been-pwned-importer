@@ -162,4 +162,3 @@ data class HashWithOccurrence(
         val fileRecordChecksumFieldName = HashWithOccurrence::fileRecordChecksum.name
     }
 }
-
