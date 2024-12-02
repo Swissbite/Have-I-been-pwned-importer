@@ -26,11 +26,8 @@ import io.ktor.client.request.prepareGet
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.utils.io.readRemaining
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.produce
 import kotlinx.io.readByteArray
@@ -41,74 +38,60 @@ import kotlin.io.path.appendBytes
 import kotlin.io.path.createFile
 import kotlin.io.path.deleteIfExists
 
-object Downloader {
-    private val hexCubicRange = (0..<16 * 16 * 16).map { it.toString(16).padStart(3, '0').uppercase() }
-    private val hexSquareRange = (0..<16 * 16).map { it.toString(16).padStart(2, '0').uppercase() }
+private val defaultClient =
+    HttpClient(OkHttp) {
 
-    private val defaultClient =
-        HttpClient(OkHttp) {
-
-            engine {
-                config {
-                    dispatcher(
-                        Dispatcher().apply {
-                            maxRequestsPerHost = maxRequests
-                        },
-                    )
-                    pipelining = true
-                }
-            }
-
-            install(HttpRequestRetry) {
-                retryOnServerErrors(10)
-                retryOnException(100, true)
-                exponentialDelay()
+        engine {
+            config {
+                dispatcher(
+                    Dispatcher().apply {
+                        maxRequestsPerHost = maxRequests
+                    },
+                )
+                pipelining = true
             }
         }
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    fun CoroutineScope.downloadToPath(
-        path: Path,
-        client: HttpClient = defaultClient,
-    ): ReceiveChannel<Path> =
-        produce(capacity = Int.MAX_VALUE, context = Dispatchers.IO) {
-            hexSquareRange.map { firstPartOfPrefix ->
-                async(start = CoroutineStart.LAZY) {
-                    hexCubicRange.map { secondPartOfPrefix ->
-                        async {
-                            val prefix = "$firstPartOfPrefix$secondPartOfPrefix"
-                            val outputPath = downloadOwnedPasswordRangeFileToPath(path, prefix, client)
-                            send(outputPath)
-                            StatusObject.increaseFilesQueued()
-                        }
-                    }
-                }
-            }.forEach { deferred ->
-                deferred.await().map {
-                    async {
-                        it.await()
-                    }
-                }.awaitAll()
-            }
+        install(HttpRequestRetry) {
+            retryOnServerErrors(10)
+            retryOnException(100, true)
+            exponentialDelay()
         }
+    }
 
-    private suspend fun downloadOwnedPasswordRangeFileToPath(
-        path: Path,
-        prefix: String,
-        client: HttpClient,
-    ): Path =
-        path.resolve("$prefix.txt").let { outputPath ->
-            outputPath.deleteIfExists()
-            client.prepareGet("https://api.pwnedpasswords.com/range/$prefix").execute { response ->
-                val channel = response.bodyAsChannel()
-                outputPath.createFile()
-                while (!channel.isClosedForRead) {
-                    val packet = channel.readRemaining(DEFAULT_BUFFER_SIZE.toLong())
-                    while (!packet.exhausted()) {
-                        outputPath.appendBytes(packet.readByteArray())
-                    }
+@OptIn(ExperimentalCoroutinesApi::class)
+fun CoroutineScope.downloadOwnedPasswordRangeFileToPath(
+    path: Path,
+    prefix: ReceiveChannel<String>,
+    client: HttpClient = defaultClient,
+): ReceiveChannel<Path> =
+    produce {
+        val outputPath = path.resolve("$prefix.txt")
+
+        val deleteAsync =
+            async {
+                outputPath.deleteIfExists()
+            }
+
+        client.prepareGet("https://api.pwnedpasswords.com/range/$prefix").execute { response ->
+            val channel = response.bodyAsChannel()
+            deleteAsync.await()
+            outputPath.createFile()
+            while (!channel.isClosedForRead) {
+                val packet = channel.readRemaining(DEFAULT_BUFFER_SIZE.toLong())
+                while (!packet.exhausted()) {
+                    outputPath.appendBytes(packet.readByteArray())
                 }
-                outputPath
             }
         }
-}
+        send(outputPath)
+        StatusObject.increaseFilesQueued()
+    }
+
+@OptIn(ExperimentalCoroutinesApi::class)
+fun CoroutineScope.prefixChannel() =
+    produce {
+        repeat(16 * 16 * 16 * 16 * 16) {
+            send(it.toString(16).padStart(5, '0').uppercase())
+        }
+    }

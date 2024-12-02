@@ -29,11 +29,12 @@ And: I wanted to try the `Channel` API of `kotlinx.coroutines` as well the `asyn
       1. Grouped: A record for each prefix
       2. Single: A record for each single hash
    5. Update / Download from internet
+      1. `true` - Will download the data from the internet
+      2. `false` - Will use the cached data
 
 ## Requirements
-
 - At least 40GB of available storage for the cached files
 - Enough disk / memory for the mongoDB
   - The storage for grouped insert is another 41 GB of disk space
-  - The storage for single insert is another 60 GB of disk space
+  - The storage for single insert is another 70 GB of disk space
   - MongoDB may require several GB of memory
