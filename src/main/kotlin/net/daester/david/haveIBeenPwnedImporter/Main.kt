@@ -20,27 +20,41 @@
 package net.daester.david.haveIBeenPwnedImporter
 
 import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.core.Context
+import com.github.ajalt.clikt.core.context
 import com.github.ajalt.clikt.core.main
+import com.github.ajalt.clikt.core.subcommands
+import com.github.ajalt.clikt.output.HelpFormatter
+import com.github.ajalt.clikt.output.MordantMarkdownHelpFormatter
+import com.github.ajalt.clikt.parameters.groups.OptionGroup
+import com.github.ajalt.clikt.parameters.groups.provideDelegate
+import com.github.ajalt.clikt.parameters.options.default
+import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.help
 import com.github.ajalt.clikt.parameters.options.option
-import com.github.ajalt.clikt.parameters.options.prompt
-import com.github.ajalt.clikt.parameters.types.boolean
-import com.github.ajalt.clikt.parameters.types.enum
+import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.path
 import com.mongodb.kotlin.client.coroutine.MongoClient
 import com.mongodb.kotlin.client.coroutine.MongoDatabase
 import io.github.oshai.kotlinlogging.KLogger
 import io.github.oshai.kotlinlogging.KotlinLogging
-import io.ktor.utils.io.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.channels.produce
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import net.daester.david.haveIBeenPwnedImporter.downloader.Downloader.downloadToPath
+import net.daester.david.haveIBeenPwnedImporter.RegisterToCancelOnSignalInt.registerChannelForIntSignal
+import net.daester.david.haveIBeenPwnedImporter.RegisterToCancelOnSignalInt.registerJobForIntSignal
+import net.daester.david.haveIBeenPwnedImporter.downloader.downloadOwnedPasswordRangeFileToPath
+import net.daester.david.haveIBeenPwnedImporter.downloader.prefixChannel
 import net.daester.david.haveIBeenPwnedImporter.file.FileData
 import net.daester.david.haveIBeenPwnedImporter.file.produceAllFilePaths
 import net.daester.david.haveIBeenPwnedImporter.file.produceFileData
@@ -48,74 +62,218 @@ import net.daester.david.haveIBeenPwnedImporter.importer.byPrefix.ImportByPrefix
 import net.daester.david.haveIBeenPwnedImporter.importer.byRecord.ImportByRecord
 import sun.misc.Signal
 import java.nio.file.Path
+import kotlin.coroutines.cancellation.CancellationException
+import kotlin.math.pow
 
 private val logger: KLogger = KotlinLogging.logger { }
 
-enum class StorageVariant { SINGLE, GROUPED }
+fun main(args: Array<String>) = Pwned().subcommands(Download(), ImportByPrefix(), ImportByHash()).main(args)
 
-class Importer : CliktCommand() {
-    private val passwordsDirectory: Path by option().path().help("Passwords Directory").prompt("Enter directory to cache passwords")
-    private val mongoDbConnectionURL: String by option().prompt("MongoDB Connection URL", "mongodb://admin:admin1234@localhost:27017")
-    private val mongoDbDatabase: String by option().prompt("MongoDB Database", "pwnd")
-    private val storageVariant: StorageVariant by option().enum<StorageVariant>().prompt(
-        "Storage Variant. Either by single hash (SINGLE) or grouped by prefix (GROUPED)",
-        StorageVariant.GROUPED,
+private val defaultHelpFormatter: (context: Context) -> HelpFormatter = {
+    MordantMarkdownHelpFormatter(context = it, showDefaultValues = true, showRequiredTag = true)
+}
+
+class Pwned : CliktCommand(name = "Have I been pwned - importer") {
+    init {
+
+        context {
+            helpFormatter = defaultHelpFormatter
+        }
+    }
+
+    override fun help(context: Context): String =
+        """
+        Download hashes to folder and / or import to a MongoDB database
+        
+        - `download` - Only download to configured cache folder
+        - `import-*` - Import to configured database with optional download to configured cache folder
+        """.trimIndent()
+
+    override fun run() = Unit
+}
+
+class CachePathOption : OptionGroup("Generic settings") {
+    val passwordHashesDirectory: Path by option().path(
+        mustExist = true,
+        canBeFile = false,
+        canBeDir = true,
+        mustBeWritable = true,
+        mustBeReadable = true,
     )
-    private val shouldUpdateFromInternet: Boolean by option().boolean().prompt("Should pwned passwords be updated from internet?", false)
+        .help("Existing writable and readable directory to cache password hashes").required()
+}
+
+class DBImportOption : OptionGroup("DB Import settings") {
+    val mongoDbConnectionURL: String by option().default("mongodb://admin:admin1234@localhost:27017").help { "MongoDB connection url." }
+    val mongoDbDatabase: String by option().default("pwnd").help { "MongoDB Database" }
+    val download: Boolean by option("--download", "-d").flag(default = false).help {
+        "If set, it will download all pwned passwords from https://haveibeenpwned.com/."
+    }
+}
+
+class Download : CliktCommand() {
+    private val cachePathOption by CachePathOption()
+
+    init {
+        context {
+            helpFormatter = defaultHelpFormatter
+        }
+    }
+
+    override fun help(context: Context): String =
+        """
+        Download hashes to folder
+        
+        Downloads all password hashes from https://haveibeenpwned.com/ and stores them in a folder.
+        
+        Currently, only SHA-1 format is supported. For more details about the API, 
+        see [Downloading all Pwned Passwords hashes](https://haveibeenpwned.com/API/v3#PwnedPasswords).
+        """.trimIndent()
 
     override fun run() {
-        val mongoClient: MongoClient = MongoClient.create(mongoDbConnectionURL)
-        val mongoDB = mongoClient.getDatabase(mongoDbDatabase)
-        runBlocking {
-            val job =
-                launch(Dispatchers.Default) {
-                    val pathsChannel =
-                        when (shouldUpdateFromInternet) {
-                            true -> downloadToPath(passwordsDirectory)
-                            false -> produceAllFilePaths(passwordsDirectory)
+        runBlocking(context = Dispatchers.IO) {
+            val prefixes = prefixChannel()
+            val downloaded = MutableStateFlow(0)
+            val totalHashes = 16.0.pow(5).toInt()
+
+            val downloadJob =
+                launch {
+                    logger.info { "Start downloads" }
+                    (0..maxRepeatLaunch).map {
+                        val downloads = downloadOwnedPasswordRangeFileToPath(cachePathOption.passwordHashesDirectory, prefixes)
+                        registerChannelForIntSignal(downloads)
+                        async {
+                            for (path in downloads) {
+                                downloaded.update { it.inc() }
+                            }
                         }
-                    val fileRead = produceFileData(pathsChannel)
-                    val job =
-                        when (storageVariant) {
-                            StorageVariant.SINGLE -> importByRecord(mongoDB, fileRead)
-                            StorageVariant.GROUPED -> importByPrefix(mongoDB, fileRead)
-                        }
-                    logger.info {
-                        StatusObject.currentStatusLogMessage
-                    }
-                    while (job.isActive) {
-                        delay(1000)
-                        logger.info {
-                            StatusObject.currentStatusLogMessage
-                        }
-                    }
-                    while (!job.isCancelled && !job.isCompleted) {
-                        logger.info {
-                            StatusObject.currentStatusLogMessage
-                        }
-                    }
-                    logger.info {
-                        StatusObject.currentStatusLogMessage
-                    }
-                    logger.info {
-                        "Job finished. Cleaning up JVM resources."
-                    }
-                    logger.info {
-                        "Thank you. :-)"
-                    }
+                    }.awaitAll()
                 }
-            Signal.handle(Signal("INT")) {
+
+            registerChannelForIntSignal(prefixes)
+            registerJobForIntSignal(downloadJob)
+            while (downloadJob.isActive) {
+                delay(1000)
                 logger.info {
-                    "Received INT signal. Canceling job."
+                    "Downloaded ${downloaded.value} / $totalHashes hashes"
                 }
-                job.cancel(CancellationException("Received INT signal. Canceling job."))
-                logger.info { "Bye :-)" }
+            }
+
+            logger.info {
+                "Downloaded ${downloaded.value} / $totalHashes hashes"
             }
         }
     }
 }
 
-fun main(args: Array<String>) = Importer().main(args)
+class ImportByPrefix : CliktCommand() {
+    init {
+        context {
+            helpFormatter = defaultHelpFormatter
+        }
+    }
+
+    private val cachePathOption: CachePathOption by CachePathOption()
+    private val importOptions: DBImportOption by DBImportOption()
+
+    override fun help(context: Context): String =
+        """
+        Import password hashes to MongoDB grouped by prefix
+           
+        Creates a single document by existing hash file in the defined cache directory.
+        """.trimIndent()
+
+    override fun run() {
+        val mongoClient: MongoClient = MongoClient.create(importOptions.mongoDbConnectionURL)
+        val mongoDB = mongoClient.getDatabase(importOptions.mongoDbDatabase)
+        runBlocking(context = Dispatchers.Default) {
+            val pathsChannel =
+                when (importOptions.download) {
+                    true -> downloadParallel(cachePathOption.passwordHashesDirectory)
+                    false -> produceAllFilePaths(cachePathOption.passwordHashesDirectory)
+                }
+
+            val importerJob = importByPrefix(mongoDB, produceFileData(pathsChannel))
+            registerChannelForIntSignal(pathsChannel)
+            registerJobForIntSignal(importerJob)
+            printStatus(importerJob)
+        }
+    }
+}
+
+class ImportByHash : CliktCommand() {
+    init {
+        context {
+            helpFormatter = defaultHelpFormatter
+        }
+    }
+
+    private val cachePathOption: CachePathOption by CachePathOption()
+    private val importOptions: DBImportOption by DBImportOption()
+
+    override fun help(context: Context): String =
+        """
+        Import password hashes to MongoDB to a document by hash
+           
+        Creates a single document for each single hash.
+        """.trimIndent()
+
+    override fun run() {
+        val mongoClient: MongoClient = MongoClient.create(importOptions.mongoDbConnectionURL)
+        val mongoDB = mongoClient.getDatabase(importOptions.mongoDbDatabase)
+        runBlocking(context = Dispatchers.Default) {
+            val pathsChannel =
+                when (importOptions.download) {
+                    true -> downloadParallel(cachePathOption.passwordHashesDirectory)
+                    false -> produceAllFilePaths(cachePathOption.passwordHashesDirectory)
+                }
+
+            val importerJob = importByRecord(mongoDB, produceFileData(pathsChannel))
+            registerChannelForIntSignal(pathsChannel)
+            registerJobForIntSignal(importerJob)
+            printStatus(importerJob)
+        }
+    }
+}
+
+private suspend fun printStatus(job: Job) {
+    logger.info {
+        StatusObject.currentStatusLogMessage
+    }
+    while (job.isActive) {
+        delay(1000)
+        logger.info {
+            StatusObject.currentStatusLogMessage
+        }
+    }
+    while (!job.isCancelled && !job.isCompleted) {
+        logger.info {
+            StatusObject.currentStatusLogMessage
+        }
+    }
+    logger.info {
+        StatusObject.currentStatusLogMessage
+    }
+    logger.info {
+        "Job finished. Cleaning up JVM resources."
+    }
+    logger.info {
+        "Thank you. :-)"
+    }
+}
+
+@OptIn(ExperimentalCoroutinesApi::class)
+private fun CoroutineScope.downloadParallel(cacheDirectory: Path): ReceiveChannel<Path> =
+    produce {
+        val prefixes = prefixChannel()
+        repeat(maxRepeatLaunch) {
+            launch {
+                for (path in downloadOwnedPasswordRangeFileToPath(cacheDirectory, prefixes)) {
+                    send(path)
+                }
+            }
+        }
+    }
 
 private fun CoroutineScope.importByPrefix(
     mongoDB: MongoDatabase,
@@ -127,7 +285,7 @@ private fun CoroutineScope.importByPrefix(
             logger.info {
                 "Starting importByPrefix process: $it"
             }
-            ibp.processHashFiles(fileChannel, this)
+            ibp.processHashFiles(fileChannel)
         }
     }.awaitAll()
 }
@@ -142,7 +300,34 @@ private fun CoroutineScope.importByRecord(
             logger.info {
                 "Starting importByHash process: $it"
             }
-            ibr.processHashFiles(fileChannel, this)
+            ibr.processHashFiles(fileChannel)
         }
     }.awaitAll()
+}
+
+object RegisterToCancelOnSignalInt {
+    private val jobsToCancel = MutableStateFlow(emptyList<Job>())
+    private val channelsToCancel = MutableStateFlow(emptyList<ReceiveChannel<*>>())
+
+    fun registerJobForIntSignal(job: Job) {
+        jobsToCancel.update { it.plus(job) }
+    }
+
+    fun registerChannelForIntSignal(channel: ReceiveChannel<*>) {
+        channelsToCancel.update { it.plus(channel) }
+    }
+
+    init {
+        Signal.handle(Signal("INT")) {
+            logger.info {
+                "Received INT signal. Canceling ${jobsToCancel.value.size} jobs and ${channelsToCancel.value.size} channels."
+            }
+            for (job in jobsToCancel.value) {
+                job.cancel(CancellationException("Received INT signal. Canceling signal."))
+            }
+            for (channel in channelsToCancel.value) {
+                channel.cancel(CancellationException("Received INT signal. Canceling signal."))
+            }
+        }
+    }
 }

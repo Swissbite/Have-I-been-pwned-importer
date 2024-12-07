@@ -29,11 +29,11 @@ import io.github.oshai.kotlinlogging.KLogger
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel.Factory.BUFFERED
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.produce
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.runBlocking
@@ -70,16 +70,13 @@ class ImportByPrefix(
     /**
      * Processes each file within the channel and upsert it into the defined collection.
      * @param fileChannel The chanel for the path of the single files to import
-     * @param scope Needed [CoroutineScope] to launch multiple [Job]s within this suspended function
      * @see ImportByPrefix
      */
-    suspend fun processHashFiles(
-        fileChannel: ReceiveChannel<FileData>,
-        scope: CoroutineScope,
-    ) {
-        val dataToProcess = scope.extractFileContent(fileChannel)
-        upsertInDb(dataToProcess, prefixCollection)
-    }
+    suspend fun processHashFiles(fileChannel: ReceiveChannel<FileData>) =
+        coroutineScope {
+            val dataToProcess = extractFileContent(fileChannel)
+            upsertInDb(dataToProcess, prefixCollection)
+        }
 
     private suspend fun createMandatoryIndexes() {
         prefixCollection
@@ -95,6 +92,9 @@ class ImportByPrefix(
             .collect()
     }
 
+    /**
+     * Creates a new [ReceiveChannel] of [PrefixWithHashes] to be imported into db.
+     */
     private fun CoroutineScope.extractFileContent(fileChannel: ReceiveChannel<FileData>): ReceiveChannel<PrefixWithHashes> =
         produce(
             capacity = BUFFERED,

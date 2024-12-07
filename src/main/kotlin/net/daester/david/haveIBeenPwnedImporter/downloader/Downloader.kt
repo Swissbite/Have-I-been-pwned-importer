@@ -19,96 +19,96 @@
 
 package net.daester.david.haveIBeenPwnedImporter.downloader
 
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.okhttp.OkHttp
-import io.ktor.client.plugins.HttpRequestRetry
-import io.ktor.client.request.prepareGet
-import io.ktor.client.statement.bodyAsChannel
-import io.ktor.utils.io.readRemaining
+import io.github.oshai.kotlinlogging.KLogger
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.produce
-import kotlinx.io.readByteArray
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import net.daester.david.haveIBeenPwnedImporter.StatusObject
-import okhttp3.Dispatcher
+import okhttp3.ConnectionPool
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.nio.file.Path
-import kotlin.io.path.appendBytes
+import java.util.concurrent.TimeUnit
 import kotlin.io.path.createFile
 import kotlin.io.path.deleteIfExists
+import kotlin.io.path.outputStream
 
-object Downloader {
-    private val hexCubicRange = (0..<16 * 16 * 16).map { it.toString(16).padStart(3, '0').uppercase() }
-    private val hexSquareRange = (0..<16 * 16).map { it.toString(16).padStart(2, '0').uppercase() }
+private val logger: KLogger = KotlinLogging.logger { }
 
-    private val defaultClient =
-        HttpClient(OkHttp) {
-
-            engine {
-                config {
-                    dispatcher(
-                        Dispatcher().apply {
-                            maxRequestsPerHost = maxRequests
-                        },
-                    )
-                    pipelining = true
-                }
+private val defaultClient =
+    OkHttpClient.Builder().retryOnConnectionFailure(true).followRedirects(true).connectionPool(
+        ConnectionPool(maxIdleConnections = 1000, keepAliveDuration = 5, timeUnit = TimeUnit.MINUTES),
+    ).addInterceptor { chain ->
+        val request = chain.request()
+        var response = chain.proceed(request)
+        var retryCounter = 0
+        val retryLimit = 5
+        while (!response.isSuccessful && retryCounter < retryLimit) {
+            response.close()
+            retryCounter = retryCounter.inc()
+            runBlocking {
+                delay(500L * retryCounter)
             }
-
-            install(HttpRequestRetry) {
-                retryOnServerErrors(10)
-                retryOnException(100, true)
-                exponentialDelay()
-            }
+            response = chain.proceed(request)
         }
+        response
+    }.addInterceptor {
+        val request = it.request()
+        logger.debug {
+            "Call -> ${request.url.encodedPath}"
+        }
+        val response = it.proceed(request)
+        logger.debug {
+            "Res <-- Status ${response.code}"
+        }
+        response
+    }.build()
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    fun CoroutineScope.downloadToPath(
-        path: Path,
-        client: HttpClient = defaultClient,
-    ): ReceiveChannel<Path> =
-        produce(capacity = Int.MAX_VALUE, context = Dispatchers.IO) {
-            hexSquareRange.map { firstPartOfPrefix ->
-                async(start = CoroutineStart.LAZY) {
-                    hexCubicRange.map { secondPartOfPrefix ->
-                        async {
-                            val prefix = "$firstPartOfPrefix$secondPartOfPrefix"
-                            val outputPath = downloadOwnedPasswordRangeFileToPath(path, prefix, client)
-                            send(outputPath)
-                            StatusObject.increaseFilesQueued()
+@OptIn(ExperimentalCoroutinesApi::class)
+fun CoroutineScope.downloadOwnedPasswordRangeFileToPath(
+    path: Path,
+    prefixes: ReceiveChannel<String>,
+    client: OkHttpClient = defaultClient,
+): ReceiveChannel<Path> =
+    produce(capacity = Channel.UNLIMITED) {
+        for (prefix in prefixes) {
+            val outputPath = path.resolve("$prefix.txt")
+
+            val deleteAsync =
+                async {
+                    outputPath.deleteIfExists()
+                }
+            val url = Request.Builder().get().url("https://api.pwnedpasswords.com/range/$prefix").build()
+            val call = client.newCall(url)
+
+            call.execute().use { response ->
+                if (response.isSuccessful) {
+                    response.body?.byteStream().use { responseInputStream ->
+                        if (responseInputStream != null) {
+                            deleteAsync.await()
+                            outputPath.createFile()
+                            outputPath.outputStream().use {
+                                responseInputStream.copyTo(it)
+                            }
                         }
                     }
                 }
-            }.forEach { deferred ->
-                deferred.await().map {
-                    async {
-                        it.await()
-                    }
-                }.awaitAll()
             }
+            send(outputPath)
+            StatusObject.increaseFilesQueued()
         }
+    }
 
-    private suspend fun downloadOwnedPasswordRangeFileToPath(
-        path: Path,
-        prefix: String,
-        client: HttpClient,
-    ): Path =
-        path.resolve("$prefix.txt").let { outputPath ->
-            outputPath.deleteIfExists()
-            client.prepareGet("https://api.pwnedpasswords.com/range/$prefix").execute { response ->
-                val channel = response.bodyAsChannel()
-                outputPath.createFile()
-                while (!channel.isClosedForRead) {
-                    val packet = channel.readRemaining(DEFAULT_BUFFER_SIZE.toLong())
-                    while (!packet.exhausted()) {
-                        outputPath.appendBytes(packet.readByteArray())
-                    }
-                }
-                outputPath
-            }
+@OptIn(ExperimentalCoroutinesApi::class)
+fun CoroutineScope.prefixChannel() =
+    produce {
+        repeat(16 * 16 * 16 * 16 * 16) {
+            send(it.toString(16).padStart(5, '0').uppercase())
         }
-}
+    }

@@ -29,11 +29,11 @@ import com.mongodb.kotlin.client.coroutine.MongoCollection
 import com.mongodb.kotlin.client.coroutine.MongoDatabase
 import io.github.oshai.kotlinlogging.KLogger
 import io.github.oshai.kotlinlogging.KotlinLogging
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -74,74 +74,76 @@ class ImportByRecord(
         }
     }
 
-    suspend fun processHashFiles(
-        fileChannel: ReceiveChannel<FileData>,
-        scope: CoroutineScope,
-    ) {
-        for (fileData in fileChannel) {
-            logger.trace { "Process hashes for ${fileData.prefix} with checksum ${fileData.checksum}" }
-            val entriesCount =
-                scope.async(Dispatchers.IO) {
-                    logger.trace { "Counting entries for ${fileData.prefix} ${fileData.checksum}" }
-                    hashCollection.countDocuments(
-                        and(
+    /**
+     * Processing all file data and insert each hash as a single record.
+     * @param fileChannel The chanel for the single file representative
+     */
+    suspend fun processHashFiles(fileChannel: ReceiveChannel<FileData>) =
+        coroutineScope {
+            for (fileData in fileChannel) {
+                logger.trace { "Process hashes for ${fileData.prefix} with checksum ${fileData.checksum}" }
+                val entriesCount =
+                    async(Dispatchers.IO) {
+                        logger.trace { "Counting entries for ${fileData.prefix} ${fileData.checksum}" }
+                        hashCollection.countDocuments(
+                            and(
+                                eq(
+                                    HashWithOccurrence.prefixFieldName,
+                                    fileData.prefix,
+                                ),
+                                eq(HashWithOccurrence.fileRecordChecksumFieldName, fileData.checksum),
+                            ),
+                        )
+                    }
+                val deleted =
+                    async(Dispatchers.IO) {
+                        logger.trace { "Deleting entries for ${fileData.prefix} with checksum not equal ${fileData.checksum}" }
+                        hashCollection.deleteMany(
+                            and(
+                                eq(HashWithOccurrence.prefixFieldName, fileData.prefix),
+                                ne(HashWithOccurrence.fileRecordChecksumFieldName, fileData.checksum),
+                            ),
+                        ).deletedCount
+                    }
+
+                if (fileData.hashesWithOccurrence.size.toLong() == entriesCount.await()) {
+                    status.increaseValidatedHashes(fileData.hashesWithOccurrence.size)
+                    status.increaseDeletedHashes(deleted.await().toInt())
+                    status.increaseTotalHashes(fileData.hashesWithOccurrence.size)
+                } else {
+                    // Either a previous update did not complete, or the hash changed. For simplicity, we'll just drop existing and re-insert all of a file.
+                    val prepareBulkInsert =
+                        async(Dispatchers.Default) {
+                            fileData.hashesWithOccurrence.map {
+                                HashWithOccurrence(
+                                    prefix = fileData.prefix,
+                                    hash = it.suffix,
+                                    occurrence = it.occurrence,
+                                    fileRecordChecksum = fileData.checksum,
+                                )
+                            }
+                        }
+                    val deletedExisting =
+                        hashCollection.deleteMany(
                             eq(
                                 HashWithOccurrence.prefixFieldName,
                                 fileData.prefix,
                             ),
-                            eq(HashWithOccurrence.fileRecordChecksumFieldName, fileData.checksum),
-                        ),
-                    )
+                        ).deletedCount
+
+                    status.increaseTotalHashes(prepareBulkInsert.await().size)
+                    hashCollection.insertMany(prepareBulkInsert.await()).wasAcknowledged()
+
+                    val inserted = abs(fileData.hashesWithOccurrence.size - deletedExisting)
+                    val updated = abs(fileData.hashesWithOccurrence.size - inserted)
+                    val deltaDeleteExisting = abs(deletedExisting - updated)
+
+                    status.increaseDeletedHashes(deleted.await().toInt() + deltaDeleteExisting.toInt())
+                    status.increaseInsertedHashes(inserted.toInt())
+                    status.increaseUpdatedHashes(updated.toInt())
                 }
-            val deleted =
-                scope.async(Dispatchers.IO) {
-                    logger.trace { "Deleting entries for ${fileData.prefix} with checksum not equal ${fileData.checksum}" }
-                    hashCollection.deleteMany(
-                        and(
-                            eq(HashWithOccurrence.prefixFieldName, fileData.prefix),
-                            ne(HashWithOccurrence.fileRecordChecksumFieldName, fileData.checksum),
-                        ),
-                    ).deletedCount
-                }
-
-            if (fileData.hashesWithOccurrence.size.toLong() == entriesCount.await()) {
-                status.increaseValidatedHashes(fileData.hashesWithOccurrence.size)
-                status.increaseDeletedHashes(deleted.await().toInt())
-                status.increaseTotalHashes(fileData.hashesWithOccurrence.size)
-            } else {
-                // Either a previous update did not complete, or the hash changed. For simplicity, we'll just drop existing and re-insert all of a file.
-                val prepareBulkInsert =
-                    scope.async(Dispatchers.Default) {
-                        fileData.hashesWithOccurrence.map {
-                            HashWithOccurrence(
-                                prefix = fileData.prefix,
-                                hash = it.suffix,
-                                occurrence = it.occurrence,
-                                fileRecordChecksum = fileData.checksum,
-                            )
-                        }
-                    }
-                val deletedExisting =
-                    hashCollection.deleteMany(
-                        eq(
-                            HashWithOccurrence.prefixFieldName,
-                            fileData.prefix,
-                        ),
-                    ).deletedCount
-
-                status.increaseTotalHashes(prepareBulkInsert.await().size)
-                hashCollection.insertMany(prepareBulkInsert.await()).wasAcknowledged()
-
-                val inserted = abs(fileData.hashesWithOccurrence.size - deletedExisting)
-                val updated = abs(fileData.hashesWithOccurrence.size - inserted)
-                val deltaDeleteExisting = abs(deletedExisting - updated)
-
-                status.increaseDeletedHashes(deleted.await().toInt() + deltaDeleteExisting.toInt())
-                status.increaseInsertedHashes(inserted.toInt())
-                status.increaseUpdatedHashes(updated.toInt())
             }
         }
-    }
 }
 
 typealias Prefix = String

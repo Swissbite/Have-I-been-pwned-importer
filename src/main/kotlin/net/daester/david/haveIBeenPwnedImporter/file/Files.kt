@@ -20,7 +20,6 @@
 package net.daester.david.haveIBeenPwnedImporter.file
 
 import io.github.oshai.kotlinlogging.KotlinLogging
-import io.ktor.utils.io.core.toByteArray
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi

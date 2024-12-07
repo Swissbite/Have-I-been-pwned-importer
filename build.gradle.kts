@@ -16,8 +16,6 @@
  * You should have received a copy of the GNU General Public License along with
  * "Have I been pwned - importer". If not, see <https://www.gnu.org/licenses/>.
  */
-val ktorVersion = "3.0.1"
-val logbackVersion = "1.5.12"
 
 plugins {
     kotlin("jvm") version "2.1.0"
@@ -37,6 +35,9 @@ application {
     mainClass = "net.daester.david.haveIBeenPwnedImporter.MainKt"
 }
 dependencies {
+    val logbackVersion = "1.5.12"
+    val cliktVersion = "5.0.1"
+
     testImplementation(kotlin("test"))
     implementation("org.mongodb:mongodb-driver-kotlin-coroutine:5.2.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
@@ -46,10 +47,16 @@ dependencies {
     implementation("org.slf4j:slf4j-api:2.0.16")
     implementation("ch.qos.logback:logback-core:$logbackVersion")
     implementation("ch.qos.logback:logback-classic:$logbackVersion")
-    implementation("com.github.ajalt.clikt:clikt:5.0.1")
+    implementation("com.github.ajalt.clikt:clikt:$cliktVersion")
+    implementation("com.github.ajalt.clikt:clikt-markdown:$cliktVersion")
     implementation("io.ktor:ktor-client-core:$ktorVersion")
     implementation("io.ktor:ktor-client-okhttp:$ktorVersion")
     implementation("io.ktor:ktor-client-logging:$ktorVersion")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+}
+
+tasks.shadowJar {
+    minimize()
 }
 
 tasks.test {
