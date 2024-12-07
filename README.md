@@ -19,18 +19,13 @@ Import those amount of data is not a 5min task on standard notebook hardware, bu
 And: I wanted to try the `Channel` API of `kotlinx.coroutines` as well the `async` and `launch` options.
 
 ## How to use this tool
-1. Start a database (currently, mongodb) with `podman` or `docker`
-   - possible with `podman compose up -d` or `docker compose up -d` 
-2. Run the application. It will ask the following arguments
-   1. Where the dataset is or should be cached (path, required)
-   2. Mongodb connection
-   3. Name of the database
-   4. How to import the data
-      1. Grouped: A record for each prefix
-      2. Single: A record for each single hash
-   5. Update / Download from internet
-      1. `true` - Will download the data from the internet
-      2. `false` - Will use the cached data
+
+You can either just download the files from https://haveibeenpwned.com to the directory defined or import them 
+a mongodb database
+
+An example mongoDB database is preconfigured within `docker-compose.yml`.
+
+
 
 ## Requirements
 - At least 40GB of available storage for the cached files

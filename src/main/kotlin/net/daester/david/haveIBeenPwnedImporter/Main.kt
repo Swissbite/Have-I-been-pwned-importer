@@ -22,11 +22,10 @@ package net.daester.david.haveIBeenPwnedImporter
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.context
-import com.github.ajalt.clikt.core.installMordantMarkdown
 import com.github.ajalt.clikt.core.main
 import com.github.ajalt.clikt.core.subcommands
 import com.github.ajalt.clikt.output.HelpFormatter
-import com.github.ajalt.clikt.output.MordantHelpFormatter
+import com.github.ajalt.clikt.output.MordantMarkdownHelpFormatter
 import com.github.ajalt.clikt.parameters.groups.OptionGroup
 import com.github.ajalt.clikt.parameters.groups.provideDelegate
 import com.github.ajalt.clikt.parameters.options.default
@@ -39,7 +38,6 @@ import com.mongodb.kotlin.client.coroutine.MongoClient
 import com.mongodb.kotlin.client.coroutine.MongoDatabase
 import io.github.oshai.kotlinlogging.KLogger
 import io.github.oshai.kotlinlogging.KotlinLogging
-import io.ktor.utils.io.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -53,6 +51,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import net.daester.david.haveIBeenPwnedImporter.RegisterToCancelOnSignalInt.registerChannelForIntSignal
+import net.daester.david.haveIBeenPwnedImporter.RegisterToCancelOnSignalInt.registerJobForIntSignal
 import net.daester.david.haveIBeenPwnedImporter.downloader.downloadOwnedPasswordRangeFileToPath
 import net.daester.david.haveIBeenPwnedImporter.downloader.prefixChannel
 import net.daester.david.haveIBeenPwnedImporter.file.FileData
@@ -62,6 +62,7 @@ import net.daester.david.haveIBeenPwnedImporter.importer.byPrefix.ImportByPrefix
 import net.daester.david.haveIBeenPwnedImporter.importer.byRecord.ImportByRecord
 import sun.misc.Signal
 import java.nio.file.Path
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.pow
 
 private val logger: KLogger = KotlinLogging.logger { }
@@ -69,12 +70,12 @@ private val logger: KLogger = KotlinLogging.logger { }
 fun main(args: Array<String>) = Pwned().subcommands(Download(), ImportByPrefix(), ImportByHash()).main(args)
 
 private val defaultHelpFormatter: (context: Context) -> HelpFormatter = {
-    MordantHelpFormatter(context = it, showDefaultValues = true, showRequiredTag = true)
+    MordantMarkdownHelpFormatter(context = it, showDefaultValues = true, showRequiredTag = true)
 }
 
-class Pwned : CliktCommand() {
+class Pwned : CliktCommand(name = "Have I been pwned - importer") {
     init {
-        installMordantMarkdown()
+
         context {
             helpFormatter = defaultHelpFormatter
         }
@@ -114,7 +115,9 @@ class Download : CliktCommand() {
     private val cachePathOption by CachePathOption()
 
     init {
-        installMordantMarkdown()
+        context {
+            helpFormatter = defaultHelpFormatter
+        }
     }
 
     override fun help(context: Context): String =
@@ -137,13 +140,18 @@ class Download : CliktCommand() {
                 launch {
                     logger.info { "Start downloads" }
                     (0..maxRepeatLaunch).map {
+                        val downloads = downloadOwnedPasswordRangeFileToPath(cachePathOption.passwordHashesDirectory, prefixes)
+                        registerChannelForIntSignal(downloads)
                         async {
-                            for (path in downloadOwnedPasswordRangeFileToPath(cachePathOption.passwordHashesDirectory, prefixes)) {
+                            for (path in downloads) {
                                 downloaded.update { it.inc() }
                             }
                         }
                     }.awaitAll()
                 }
+
+            registerChannelForIntSignal(prefixes)
+            registerJobForIntSignal(downloadJob)
             while (downloadJob.isActive) {
                 delay(1000)
                 logger.info {
@@ -160,7 +168,6 @@ class Download : CliktCommand() {
 
 class ImportByPrefix : CliktCommand() {
     init {
-        installMordantMarkdown()
         context {
             helpFormatter = defaultHelpFormatter
         }
@@ -187,7 +194,8 @@ class ImportByPrefix : CliktCommand() {
                 }
 
             val importerJob = importByPrefix(mongoDB, produceFileData(pathsChannel))
-            registerIntSignalToCancelJob(importerJob)
+            registerChannelForIntSignal(pathsChannel)
+            registerJobForIntSignal(importerJob)
             printStatus(importerJob)
         }
     }
@@ -195,7 +203,6 @@ class ImportByPrefix : CliktCommand() {
 
 class ImportByHash : CliktCommand() {
     init {
-        installMordantMarkdown()
         context {
             helpFormatter = defaultHelpFormatter
         }
@@ -222,19 +229,10 @@ class ImportByHash : CliktCommand() {
                 }
 
             val importerJob = importByRecord(mongoDB, produceFileData(pathsChannel))
-            registerIntSignalToCancelJob(importerJob)
+            registerChannelForIntSignal(pathsChannel)
+            registerJobForIntSignal(importerJob)
             printStatus(importerJob)
         }
-    }
-}
-
-private fun registerIntSignalToCancelJob(job: Job) {
-    Signal.handle(Signal("INT")) {
-        logger.info {
-            "Received INT signal. Canceling job."
-        }
-        job.cancel(CancellationException("Received INT signal. Canceling job."))
-        logger.info { "Bye :-)" }
     }
 }
 
@@ -287,7 +285,7 @@ private fun CoroutineScope.importByPrefix(
             logger.info {
                 "Starting importByPrefix process: $it"
             }
-            ibp.processHashFiles(fileChannel, this)
+            ibp.processHashFiles(fileChannel)
         }
     }.awaitAll()
 }
@@ -302,7 +300,34 @@ private fun CoroutineScope.importByRecord(
             logger.info {
                 "Starting importByHash process: $it"
             }
-            ibr.processHashFiles(fileChannel, this)
+            ibr.processHashFiles(fileChannel)
         }
     }.awaitAll()
+}
+
+object RegisterToCancelOnSignalInt {
+    private val jobsToCancel = MutableStateFlow(emptyList<Job>())
+    private val channelsToCancel = MutableStateFlow(emptyList<ReceiveChannel<*>>())
+
+    fun registerJobForIntSignal(job: Job) {
+        jobsToCancel.update { it.plus(job) }
+    }
+
+    fun registerChannelForIntSignal(channel: ReceiveChannel<*>) {
+        channelsToCancel.update { it.plus(channel) }
+    }
+
+    init {
+        Signal.handle(Signal("INT")) {
+            logger.info {
+                "Received INT signal. Canceling ${jobsToCancel.value.size} jobs and ${channelsToCancel.value.size} channels."
+            }
+            for (job in jobsToCancel.value) {
+                job.cancel(CancellationException("Received INT signal. Canceling signal."))
+            }
+            for (channel in channelsToCancel.value) {
+                channel.cancel(CancellationException("Received INT signal. Canceling signal."))
+            }
+        }
+    }
 }

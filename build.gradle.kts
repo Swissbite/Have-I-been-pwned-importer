@@ -35,7 +35,6 @@ application {
     mainClass = "net.daester.david.haveIBeenPwnedImporter.MainKt"
 }
 dependencies {
-    val ktorVersion = "3.0.1"
     val logbackVersion = "1.5.12"
     val cliktVersion = "5.0.1"
 
@@ -53,6 +52,11 @@ dependencies {
     implementation("io.ktor:ktor-client-core:$ktorVersion")
     implementation("io.ktor:ktor-client-okhttp:$ktorVersion")
     implementation("io.ktor:ktor-client-logging:$ktorVersion")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+}
+
+tasks.shadowJar {
+    minimize()
 }
 
 tasks.test {
