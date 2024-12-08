@@ -69,7 +69,9 @@ class ImportByPrefix : CliktCommand() {
                     false -> produceAllFilePaths(cachePathOption.passwordHashesDirectory)
                 }
 
-            val importerJob = importByPrefix(mongoDB, produceFileData(pathsChannel))
+            val fileDataChannel = produceFileData(pathsChannel)
+            val importerJob = importByPrefix(mongoDB, fileDataChannel)
+            RegisterToCancelOnSignalInt.registerChannelForIntSignal(fileDataChannel)
             RegisterToCancelOnSignalInt.registerChannelForIntSignal(pathsChannel)
             RegisterToCancelOnSignalInt.registerJobForIntSignal(importerJob)
             StatusObject.logStatusWhileJobIsRunning(importerJob)

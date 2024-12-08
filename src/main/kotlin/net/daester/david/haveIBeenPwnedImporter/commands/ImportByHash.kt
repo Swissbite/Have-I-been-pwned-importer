@@ -68,9 +68,10 @@ class ImportByHash : CliktCommand() {
                     true -> downloadParallel(cachePathOption.passwordHashesDirectory)
                     false -> produceAllFilePaths(cachePathOption.passwordHashesDirectory)
                 }
-
-            val importerJob = importByRecord(mongoDB, produceFileData(pathsChannel))
+            val fileDataChannel = produceFileData(pathsChannel)
+            val importerJob = importByRecord(mongoDB, fileDataChannel)
             RegisterToCancelOnSignalInt.registerChannelForIntSignal(pathsChannel)
+            RegisterToCancelOnSignalInt.registerChannelForIntSignal(fileDataChannel)
             RegisterToCancelOnSignalInt.registerJobForIntSignal(importerJob)
             StatusObject.logStatusWhileJobIsRunning(importerJob)
         }
@@ -81,10 +82,10 @@ class ImportByHash : CliktCommand() {
         fileChannel: ReceiveChannel<FileData>,
     ) = launch {
         val ibr = ImportByRecord(status = StatusObject, database = mongoDB)
-        (0..maxRepeatLaunch).map {
+        (1..maxRepeatLaunch).map {
             async {
                 logger.info {
-                    "Starting importByHash process: $it"
+                    "Starting importByHash process: $it/$maxRepeatLaunch"
                 }
                 ibr.processHashFiles(fileChannel)
             }
