@@ -21,7 +21,7 @@ plugins {
     kotlin("jvm") version "2.1.0"
     application
     id("com.gradleup.shadow") version "8.3.5"
-    id("org.jlleitschuh.gradle.ktlint") version "12.1.1"
+    id("org.jlleitschuh.gradle.ktlint") version "12.1.2"
     id("com.github.ben-manes.versions") version "0.51.0"
 }
 
@@ -36,7 +36,7 @@ application {
 }
 dependencies {
     val logbackVersion = "1.5.12"
-    val cliktVersion = "5.0.1"
+    val cliktVersion = "5.0.2"
 
     testImplementation(kotlin("test"))
     implementation("org.mongodb:mongodb-driver-kotlin-coroutine:5.2.0")
@@ -49,14 +49,21 @@ dependencies {
     implementation("ch.qos.logback:logback-classic:$logbackVersion")
     implementation("com.github.ajalt.clikt:clikt:$cliktVersion")
     implementation("com.github.ajalt.clikt:clikt-markdown:$cliktVersion")
-    implementation("io.ktor:ktor-client-core:$ktorVersion")
-    implementation("io.ktor:ktor-client-okhttp:$ktorVersion")
-    implementation("io.ktor:ktor-client-logging:$ktorVersion")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
 
 tasks.shadowJar {
+    archiveFileName.set("pwned.jar")
+    archiveBaseName.set("pwned")
+
     minimize()
+}
+tasks.startScripts {
+    applicationName = "pwned"
+}
+
+tasks.startShadowScripts {
+    applicationName = "pwned"
 }
 
 tasks.test {

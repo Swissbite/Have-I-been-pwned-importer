@@ -19,6 +19,9 @@
 
 package net.daester.david.haveIBeenPwnedImporter
 
+import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -41,6 +44,8 @@ interface Status {
     fun increaseUpdatedHashes(increaseBy: Int = 1)
 
     val currentStatusLogMessage: String
+
+    suspend fun logStatusWhileJobIsRunning(job: Job)
 }
 
 data class CurrentState(
@@ -57,6 +62,7 @@ data class CurrentState(
 object StatusObject : Status {
     private val statusCurrentStateMutable = MutableStateFlow(CurrentState())
     private val currentState = statusCurrentStateMutable.asStateFlow()
+    private val logger = KotlinLogging.logger { }
 
     override fun increaseFilesQueued() {
         statusCurrentStateMutable.update { state -> state.copy(filesQueued = state.filesQueued.inc()) }
@@ -110,4 +116,27 @@ object StatusObject : Status {
                 " - Updated: $updated" +
                 " - Deleted: $deleted"
         }
+
+    override suspend fun logStatusWhileJobIsRunning(job: Job) {
+        while (job.isActive) {
+            logger.info {
+                currentStatusLogMessage
+            }
+            delay(1000)
+        }
+        while (!job.isCancelled && !job.isCompleted) {
+            logger.info {
+                currentStatusLogMessage
+            }
+        }
+        logger.info {
+            currentStatusLogMessage
+        }
+        logger.info {
+            "Job finished. Cleaning up JVM resources."
+        }
+        logger.info {
+            "Thank you. :-)"
+        }
+    }
 }

@@ -25,9 +25,14 @@ a mongodb database
 
 An example mongoDB database is preconfigured within `docker-compose.yml`.
 
+- `pwned --help` - see all available options
+- `pwned download --help` - see all available options for just download the files
+- `pwned import-by-hash --help` - see all available options for importing the hashes as a single record
+- `pwned import-by-prefix --help` - see all available options for importing the hashes grouped by prefix
 
 
 ## Requirements
+- Java 21+
 - At least 40GB of available storage for the cached files
 - Enough disk / memory for the mongoDB
   - The storage for grouped insert is another 41 GB of disk space

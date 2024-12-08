@@ -2,6 +2,7 @@
 <!DOCTYPE configuration>
 
 <configuration>
+
     <import class="ch.qos.logback.classic.encoder.PatternLayoutEncoder"/>
     <import class="ch.qos.logback.core.ConsoleAppender"/>
 
@@ -11,8 +12,7 @@
         </encoder>
     </appender>
 
-    <logger name="net.daester.david.haveIBeenPwnedImporter" level="info" />
-    <logger name="net.daester.david.haveIBeenPwnedImporter.importer" level="info" />
+    <logger name="net.daester.david.haveIBeenPwnedImporter" level="info"/>
     <root level="info">
         <appender-ref ref="STDOUT"/>
     </root>
