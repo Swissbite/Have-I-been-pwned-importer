@@ -39,7 +39,7 @@ dependencies {
     val cliktVersion = "5.0.2"
 
     testImplementation(kotlin("test"))
-    implementation("org.mongodb:mongodb-driver-kotlin-coroutine:5.2.0")
+    implementation("org.mongodb:mongodb-driver-kotlin-coroutine:5.2.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.7.3")
     implementation("io.github.oshai:kotlin-logging:7.0.3")
