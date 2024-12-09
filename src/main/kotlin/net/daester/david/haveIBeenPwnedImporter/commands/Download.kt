@@ -24,13 +24,9 @@ import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.context
 import com.github.ajalt.clikt.parameters.groups.provideDelegate
 import io.github.oshai.kotlinlogging.KotlinLogging
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.channels.ReceiveChannel
-import kotlinx.coroutines.channels.produce
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
@@ -40,7 +36,6 @@ import net.daester.david.haveIBeenPwnedImporter.RegisterToCancelOnSignalInt
 import net.daester.david.haveIBeenPwnedImporter.downloader.downloadOwnedPasswordRangeFileToPath
 import net.daester.david.haveIBeenPwnedImporter.downloader.prefixChannel
 import net.daester.david.haveIBeenPwnedImporter.maxRepeatLaunch
-import java.nio.file.Path
 import kotlin.math.pow
 
 class Download : CliktCommand() {
@@ -99,16 +94,3 @@ class Download : CliktCommand() {
         }
     }
 }
-
-@OptIn(ExperimentalCoroutinesApi::class)
-internal fun CoroutineScope.downloadParallel(cacheDirectory: Path): ReceiveChannel<Path> =
-    produce {
-        val prefixes = prefixChannel()
-        repeat(maxRepeatLaunch) {
-            launch {
-                for (path in downloadOwnedPasswordRangeFileToPath(cacheDirectory, prefixes)) {
-                    send(path)
-                }
-            }
-        }
-    }

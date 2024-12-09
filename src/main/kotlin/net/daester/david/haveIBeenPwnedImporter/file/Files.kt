@@ -86,7 +86,7 @@ fun CoroutineScope.produceFileData(fileChannel: ReceiveChannel<Path>): ReceiveCh
                             }.filterNotNull().toList()
                         }
 
-                    val checksum = md.digest().toHexString()
+                    val checksum = md.digest().toHexString(HexFormat.UpperCase)
 
                     send(FileData(prefix = prefix, hashesWithOccurrence = hashes, checksum = checksum))
                     StatusObject.increaseFilesRead()

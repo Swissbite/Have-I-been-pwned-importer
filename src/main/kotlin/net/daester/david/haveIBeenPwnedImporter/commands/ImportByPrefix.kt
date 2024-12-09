@@ -25,16 +25,14 @@ import com.github.ajalt.clikt.core.context
 import com.github.ajalt.clikt.parameters.groups.provideDelegate
 import com.mongodb.kotlin.client.coroutine.MongoClient
 import com.mongodb.kotlin.client.coroutine.MongoDatabase
-import io.github.oshai.kotlinlogging.KotlinLogging
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import net.daester.david.haveIBeenPwnedImporter.RegisterToCancelOnSignalInt
 import net.daester.david.haveIBeenPwnedImporter.StatusObject
+import net.daester.david.haveIBeenPwnedImporter.downloader.downloadParallel
 import net.daester.david.haveIBeenPwnedImporter.file.FileData
 import net.daester.david.haveIBeenPwnedImporter.file.produceAllFilePaths
 import net.daester.david.haveIBeenPwnedImporter.file.produceFileData
@@ -50,7 +48,6 @@ class ImportByPrefix : CliktCommand() {
 
     private val cachePathOption: CachePathOption by CachePathOption()
     private val importOptions: DBImportOption by DBImportOption()
-    private val logger = KotlinLogging.logger { }
 
     override fun help(context: Context): String =
         """
@@ -70,7 +67,10 @@ class ImportByPrefix : CliktCommand() {
                 }
 
             val fileDataChannel = produceFileData(pathsChannel)
-            val importerJob = importByPrefix(mongoDB, fileDataChannel)
+            val importerJob =
+                launch {
+                    importByPrefix(mongoDB, fileDataChannel)
+                }
             RegisterToCancelOnSignalInt.registerChannelForIntSignal(fileDataChannel)
             RegisterToCancelOnSignalInt.registerChannelForIntSignal(pathsChannel)
             RegisterToCancelOnSignalInt.registerJobForIntSignal(importerJob)
@@ -78,18 +78,15 @@ class ImportByPrefix : CliktCommand() {
         }
     }
 
-    private fun CoroutineScope.importByPrefix(
+    private suspend fun importByPrefix(
         mongoDB: MongoDatabase,
         fileChannel: ReceiveChannel<FileData>,
-    ) = launch {
+    ) = coroutineScope {
         val ibp = ImportByPrefix(status = StatusObject, database = mongoDB)
-        (0..maxRepeatLaunch).map {
-            async {
-                logger.info {
-                    "Starting importByPrefix process: $it"
-                }
+        repeat(maxRepeatLaunch) {
+            launch {
                 ibp.processHashFiles(fileChannel)
             }
-        }.awaitAll()
+        }
     }
 }

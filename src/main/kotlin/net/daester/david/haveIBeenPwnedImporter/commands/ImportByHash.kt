@@ -35,6 +35,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import net.daester.david.haveIBeenPwnedImporter.RegisterToCancelOnSignalInt
 import net.daester.david.haveIBeenPwnedImporter.StatusObject
+import net.daester.david.haveIBeenPwnedImporter.downloader.downloadParallel
 import net.daester.david.haveIBeenPwnedImporter.file.FileData
 import net.daester.david.haveIBeenPwnedImporter.file.produceAllFilePaths
 import net.daester.david.haveIBeenPwnedImporter.file.produceFileData

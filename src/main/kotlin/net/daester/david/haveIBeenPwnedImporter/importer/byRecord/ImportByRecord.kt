@@ -25,6 +25,7 @@ import com.mongodb.client.model.Filters.and
 import com.mongodb.client.model.Filters.eq
 import com.mongodb.client.model.Filters.ne
 import com.mongodb.client.model.IndexModel
+import com.mongodb.client.model.InsertManyOptions
 import com.mongodb.kotlin.client.coroutine.MongoCollection
 import com.mongodb.kotlin.client.coroutine.MongoDatabase
 import io.github.oshai.kotlinlogging.KLogger
@@ -58,6 +59,7 @@ class ImportByRecord(
     private val occurrenceIndex = IndexModel(BsonDocument(listOf(BsonElement(HashWithOccurrence.occurrenceFieldName, BsonInt32(-1)))))
     private val fileRecordChecksum =
         IndexModel(BsonDocument(listOf(BsonElement(HashWithOccurrence.fileRecordChecksumFieldName, BsonInt32(1)))))
+    private val insertManyOptions = InsertManyOptions().ordered(false).bypassDocumentValidation(true)
 
     init {
         logger.info {
@@ -132,7 +134,7 @@ class ImportByRecord(
                         ).deletedCount
 
                     status.increaseTotalHashes(prepareBulkInsert.await().size)
-                    hashCollection.insertMany(prepareBulkInsert.await()).wasAcknowledged()
+                    hashCollection.insertMany(prepareBulkInsert.await(), insertManyOptions).wasAcknowledged()
 
                     val inserted = abs(fileData.hashesWithOccurrence.size - deletedExisting)
                     val updated = abs(fileData.hashesWithOccurrence.size - inserted)
@@ -142,6 +144,7 @@ class ImportByRecord(
                     status.increaseInsertedHashes(inserted.toInt())
                     status.increaseUpdatedHashes(updated.toInt())
                 }
+                status.increaseFileProcessed()
             }
         }
 }

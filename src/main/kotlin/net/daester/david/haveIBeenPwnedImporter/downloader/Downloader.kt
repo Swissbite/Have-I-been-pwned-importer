@@ -23,20 +23,21 @@ import io.github.oshai.kotlinlogging.KLogger
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.async
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.produce
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import net.daester.david.haveIBeenPwnedImporter.RegisterToCancelOnSignalInt
 import net.daester.david.haveIBeenPwnedImporter.StatusObject
+import net.daester.david.haveIBeenPwnedImporter.defaultChannelCapacity
+import net.daester.david.haveIBeenPwnedImporter.maxRepeatLaunch
 import okhttp3.ConnectionPool
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.nio.file.Path
+import java.nio.file.StandardOpenOption
 import java.util.concurrent.TimeUnit
-import kotlin.io.path.createFile
-import kotlin.io.path.deleteIfExists
 import kotlin.io.path.outputStream
 
 private val logger: KLogger = KotlinLogging.logger { }
@@ -76,14 +77,10 @@ fun CoroutineScope.downloadOwnedPasswordRangeFileToPath(
     prefixes: ReceiveChannel<String>,
     client: OkHttpClient = defaultClient,
 ): ReceiveChannel<Path> =
-    produce(capacity = Channel.UNLIMITED) {
+    produce(capacity = defaultChannelCapacity, context = coroutineContext) {
         for (prefix in prefixes) {
             val outputPath = path.resolve("$prefix.txt")
 
-            val deleteAsync =
-                async {
-                    outputPath.deleteIfExists()
-                }
             val url = Request.Builder().get().url("https://api.pwnedpasswords.com/range/$prefix").build()
             val call = client.newCall(url)
 
@@ -91,24 +88,45 @@ fun CoroutineScope.downloadOwnedPasswordRangeFileToPath(
                 if (response.isSuccessful) {
                     response.body?.byteStream().use { responseInputStream ->
                         if (responseInputStream != null) {
-                            deleteAsync.await()
-                            outputPath.createFile()
-                            outputPath.outputStream().use {
+                            outputPath.outputStream(
+                                StandardOpenOption.CREATE,
+                                StandardOpenOption.TRUNCATE_EXISTING,
+                                StandardOpenOption.WRITE,
+                            ).use {
                                 responseInputStream.copyTo(it)
                             }
                         }
                     }
                 }
+                send(outputPath)
+                StatusObject.increaseFilesQueued()
             }
-            send(outputPath)
-            StatusObject.increaseFilesQueued()
         }
     }
 
 @OptIn(ExperimentalCoroutinesApi::class)
 fun CoroutineScope.prefixChannel() =
-    produce {
+    produce(context = this.coroutineContext) {
         repeat(16 * 16 * 16 * 16 * 16) {
             send(it.toString(16).padStart(5, '0').uppercase())
+        }
+    }
+
+@OptIn(ExperimentalCoroutinesApi::class)
+internal fun CoroutineScope.downloadParallel(cacheDirectory: Path): ReceiveChannel<Path> =
+    produce(capacity = defaultChannelCapacity, context = coroutineContext) {
+        val prefixes = prefixChannel()
+        repeat(maxRepeatLaunch) {
+            val downloadJob =
+                launch {
+                    val downloads =
+                        downloadOwnedPasswordRangeFileToPath(cacheDirectory, prefixes)
+                    RegisterToCancelOnSignalInt.registerChannelForIntSignal(downloads)
+                    RegisterToCancelOnSignalInt.registerChannelForIntSignal(prefixes)
+                    for (path in downloads) {
+                        send(path)
+                    }
+                }
+            RegisterToCancelOnSignalInt.registerJobForIntSignal(downloadJob)
         }
     }
