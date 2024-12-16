@@ -33,13 +33,12 @@ import kotlinx.coroutines.launch
 import net.daester.david.haveIBeenPwnedImporter.StatusObject
 import net.daester.david.haveIBeenPwnedImporter.defaultChannelCapacity
 import net.daester.david.haveIBeenPwnedImporter.maxRepeatLaunch
+import net.daester.david.haveIBeenPwnedImporter.model.FileData
+import net.daester.david.haveIBeenPwnedImporter.model.SuffixHashWithOccurrence
 import java.nio.file.Path
 import java.security.MessageDigest
 import kotlin.io.path.bufferedReader
 import kotlin.streams.asStream
-
-typealias Prefix = String
-typealias Suffix = String
 
 private val logger = KotlinLogging.logger { }
 
@@ -79,7 +78,7 @@ fun CoroutineScope.produceFileData(fileChannel: ReceiveChannel<Path>): ReceiveCh
                                     }
 
                                     else -> {
-                                        HashWithOccurrence(suffix = it[0], occurrence = occurrence)
+                                        SuffixHashWithOccurrence(suffix = it[0], occurrence = occurrence)
                                             .also { md.update("${it.suffix}:${it.occurrence}".toByteArray()) }
                                     }
                                 }
@@ -94,7 +93,3 @@ fun CoroutineScope.produceFileData(fileChannel: ReceiveChannel<Path>): ReceiveCh
             }
         }
     }
-
-data class FileData(val prefix: Prefix, val hashesWithOccurrence: List<HashWithOccurrence>, val checksum: String)
-
-data class HashWithOccurrence(val suffix: Suffix, val occurrence: Int)

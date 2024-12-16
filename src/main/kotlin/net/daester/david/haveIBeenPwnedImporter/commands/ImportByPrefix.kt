@@ -23,8 +23,6 @@ import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.context
 import com.github.ajalt.clikt.parameters.groups.provideDelegate
-import com.mongodb.kotlin.client.coroutine.MongoClient
-import com.mongodb.kotlin.client.coroutine.MongoDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.coroutineScope
@@ -32,12 +30,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import net.daester.david.haveIBeenPwnedImporter.RegisterToCancelOnSignalInt
 import net.daester.david.haveIBeenPwnedImporter.StatusObject
-import net.daester.david.haveIBeenPwnedImporter.downloader.downloadParallel
-import net.daester.david.haveIBeenPwnedImporter.file.FileData
+import net.daester.david.haveIBeenPwnedImporter.db.ByPrefixAccessLayer
+import net.daester.david.haveIBeenPwnedImporter.db.mongo.MongoDbByPrefixAccessLayer
 import net.daester.david.haveIBeenPwnedImporter.file.produceAllFilePaths
 import net.daester.david.haveIBeenPwnedImporter.file.produceFileData
-import net.daester.david.haveIBeenPwnedImporter.importer.byPrefix.ImportByPrefix
+import net.daester.david.haveIBeenPwnedImporter.importer.ByPrefixImporter
 import net.daester.david.haveIBeenPwnedImporter.maxRepeatLaunch
+import net.daester.david.haveIBeenPwnedImporter.model.FileData
 
 class ImportByPrefix : CliktCommand() {
     init {
@@ -47,7 +46,7 @@ class ImportByPrefix : CliktCommand() {
     }
 
     private val cachePathOption: CachePathOption by CachePathOption()
-    private val importOptions: DBImportOption by DBImportOption()
+    private val dbSettings by MongoDBSettings()
 
     override fun help(context: Context): String =
         """
@@ -57,19 +56,16 @@ class ImportByPrefix : CliktCommand() {
         """.trimIndent()
 
     override fun run() {
-        val mongoClient: MongoClient = MongoClient.create(importOptions.mongoDbConnectionURI)
-        val mongoDB = mongoClient.getDatabase(importOptions.mongoDbDatabase)
+        val accessLayer =
+            MongoDbByPrefixAccessLayer(dbSettings.mongoDbConnectionURI, dbSettings.mongoDbDatabase, dbSettings.collectionName)
+
         runBlocking(context = Dispatchers.Default) {
-            val pathsChannel =
-                when (importOptions.download) {
-                    true -> downloadParallel(cachePathOption.passwordHashesDirectory)
-                    false -> produceAllFilePaths(cachePathOption.passwordHashesDirectory)
-                }
+            val pathsChannel = produceAllFilePaths(cachePathOption.passwordHashesDirectory)
 
             val fileDataChannel = produceFileData(pathsChannel)
             val importerJob =
                 launch {
-                    importByPrefix(mongoDB, fileDataChannel)
+                    importByPrefix(accessLayer, fileDataChannel)
                 }
             RegisterToCancelOnSignalInt.registerChannelForIntSignal(fileDataChannel)
             RegisterToCancelOnSignalInt.registerChannelForIntSignal(pathsChannel)
@@ -79,10 +75,10 @@ class ImportByPrefix : CliktCommand() {
     }
 
     private suspend fun importByPrefix(
-        mongoDB: MongoDatabase,
+        accessLayer: ByPrefixAccessLayer,
         fileChannel: ReceiveChannel<FileData>,
     ) = coroutineScope {
-        val ibp = ImportByPrefix(status = StatusObject, database = mongoDB)
+        val ibp = ByPrefixImporter(accessLayer = accessLayer)
         repeat(maxRepeatLaunch) {
             launch {
                 ibp.processHashFiles(fileChannel)

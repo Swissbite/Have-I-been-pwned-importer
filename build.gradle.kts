@@ -23,6 +23,7 @@ plugins {
     id("com.gradleup.shadow") version "8.3.5"
     id("org.jlleitschuh.gradle.ktlint") version "12.1.2"
     id("com.github.ben-manes.versions") version "0.51.0"
+    id("org.jooq.jooq-codegen-gradle") version "3.19.16"
 }
 
 group = "org.example"
@@ -34,10 +35,15 @@ repositories {
 application {
     mainClass = "net.daester.david.haveIBeenPwnedImporter.MainKt"
 }
+sourceSets {
+    create("jooq") {
+        java.srcDirs("src/main/jooq/kotlin")
+    }
+}
 dependencies {
     val logbackVersion = "1.5.12"
     val cliktVersion = "5.0.2"
-
+    val jooqVersion = "3.19.16"
     testImplementation(kotlin("test"))
     implementation("org.mongodb:mongodb-driver-kotlin-coroutine:5.2.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
@@ -50,8 +56,51 @@ dependencies {
     implementation("com.github.ajalt.clikt:clikt:$cliktVersion")
     implementation("com.github.ajalt.clikt:clikt-markdown:$cliktVersion")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.jooq:jooq-kotlin:$jooqVersion")
+    implementation("org.jooq:jooq-kotlin-coroutines:$jooqVersion")
+    implementation("org.mariadb.jdbc:mariadb-java-client:3.5.1")
+
+    "jooqImplementation"("org.jooq:jooq-kotlin:$jooqVersion")
+
+    implementation(sourceSets.named("jooq").get().output)
+    implementation("com.zaxxer:HikariCP:6.2.1")
+
+    jooqCodegen(group = "org.mariadb.jdbc", name = "mariadb-java-client", version = "3.5.1")
+}
+configure<org.jlleitschuh.gradle.ktlint.KtlintExtension> {
+
+    filter {
+        exclude("""**/jooq/**""")
+    }
 }
 
+jooq {
+    configuration {
+        jdbc {
+            driver = "org.mariadb.jdbc.Driver"
+            url = "jdbc:mariadb://localhost:3306/pwned"
+            user = "pwned"
+            password = "pwned"
+        }
+        generator {
+            name = "org.jooq.codegen.KotlinGenerator"
+            database {
+                name = "org.jooq.meta.mariadb.MariaDBDatabase"
+                inputSchema = "pwned"
+            }
+
+            generate {
+                isJavaTimeTypes = true
+                isPojos = true
+            }
+
+            target {
+                directory = "./src/jooq/kotlin"
+                packageName = "net.daester.david.haveIBeenPwnedImporter.jooq"
+            }
+        }
+    }
+}
 tasks.shadowJar {
     archiveFileName.set("pwned.jar")
     archiveBaseName.set("pwned")

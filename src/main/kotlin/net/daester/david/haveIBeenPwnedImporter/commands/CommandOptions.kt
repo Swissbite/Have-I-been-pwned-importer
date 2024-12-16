@@ -20,8 +20,8 @@
 package net.daester.david.haveIBeenPwnedImporter.commands
 
 import com.github.ajalt.clikt.parameters.groups.OptionGroup
+import com.github.ajalt.clikt.parameters.options.check
 import com.github.ajalt.clikt.parameters.options.default
-import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.help
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
@@ -39,15 +39,30 @@ class CachePathOption : OptionGroup("Generic settings") {
         .help("Existing writable and readable directory to cache password hashes").required()
 }
 
-class DBImportOption : OptionGroup("DB Import settings") {
+sealed class DBSettings(name: String) : OptionGroup(name)
+
+class MongoDBSettings : DBSettings("MongoDB Database settings") {
     val mongoDbConnectionURI: String by option(
-        "--mongo-db-connection-uri",
+        "--mongodb-connection-uri",
         "--uri",
     ).default("mongodb://admin:admin1234@localhost:27017").help {
         "MongoDB connection url."
     }
-    val mongoDbDatabase: String by option("--mongo-db-database", "--db").default("pwnd").help { "MongoDB Database" }
-    val download: Boolean by option("--download", "-d").flag(default = false).help {
-        "If set, it will download all pwned passwords from https://haveibeenpwned.com/."
-    }
+    val mongoDbDatabase: String by option("--mongo-database").default("pwnd").help { "MongoDB Database" }
+
+    val collectionName: String? by option("--collection-name").help { "MongoDB Collection" }
+}
+
+class MariaDBSettings : DBSettings("MariaDB Database settings") {
+    val mariaDbHost: String by option(
+        "--mariadb-host",
+        "--host",
+    ).default("localhost:3306").help {
+        "MariaDB host with port."
+    }.check(lazyMessage = {
+        "Must contain host name and port. See default value as example"
+    }) { it.split(":").size == 2 && it.split("/").size == 1 }
+    val mariadbDatabase: String by option("--mariadb-database").default("pwned").help { "MariaDB Database" }
+    val mariadbUser: String by option("--mariadb-user", "--user").default("pwned").help { "MariaDB User" }
+    val mariadbPassword: String by option("--mariadb-password", "--password").default("pwned").help { "MariaDB Password" }
 }

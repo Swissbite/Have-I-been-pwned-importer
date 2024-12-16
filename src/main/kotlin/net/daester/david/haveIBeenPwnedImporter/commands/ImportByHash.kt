@@ -19,12 +19,15 @@
 
 package net.daester.david.haveIBeenPwnedImporter.commands
 
+import MariaDbByRecordAccessLayer
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.context
+import com.github.ajalt.clikt.parameters.groups.groupSwitch
 import com.github.ajalt.clikt.parameters.groups.provideDelegate
-import com.mongodb.kotlin.client.coroutine.MongoClient
-import com.mongodb.kotlin.client.coroutine.MongoDatabase
+import com.github.ajalt.clikt.parameters.groups.required
+import com.github.ajalt.clikt.parameters.options.help
+import com.github.ajalt.clikt.parameters.options.option
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,12 +38,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import net.daester.david.haveIBeenPwnedImporter.RegisterToCancelOnSignalInt
 import net.daester.david.haveIBeenPwnedImporter.StatusObject
-import net.daester.david.haveIBeenPwnedImporter.downloader.downloadParallel
-import net.daester.david.haveIBeenPwnedImporter.file.FileData
+import net.daester.david.haveIBeenPwnedImporter.db.ByRecordAccessLayer
+import net.daester.david.haveIBeenPwnedImporter.db.mongo.MongoDbByRecordAccessLayer
 import net.daester.david.haveIBeenPwnedImporter.file.produceAllFilePaths
 import net.daester.david.haveIBeenPwnedImporter.file.produceFileData
-import net.daester.david.haveIBeenPwnedImporter.importer.byRecord.ImportByRecord
+import net.daester.david.haveIBeenPwnedImporter.importer.ByRecordImporter
 import net.daester.david.haveIBeenPwnedImporter.maxRepeatLaunch
+import net.daester.david.haveIBeenPwnedImporter.model.FileData
 
 class ImportByHash : CliktCommand() {
     init {
@@ -50,7 +54,9 @@ class ImportByHash : CliktCommand() {
     }
 
     private val cachePathOption: CachePathOption by CachePathOption()
-    private val importOptions: DBImportOption by DBImportOption()
+    private val dbSettings by option().help {
+        "Switch between mongoDB or mariaDB as target storage"
+    }.groupSwitch("--mariadb" to MariaDBSettings(), "--mongodb" to MongoDBSettings()).required()
     private val logger = KotlinLogging.logger {}
 
     override fun help(context: Context): String =
@@ -61,16 +67,23 @@ class ImportByHash : CliktCommand() {
         """.trimIndent()
 
     override fun run() {
-        val mongoClient: MongoClient = MongoClient.create(importOptions.mongoDbConnectionURI)
-        val mongoDB = mongoClient.getDatabase(importOptions.mongoDbDatabase)
+        val accessLayer =
+            when (val dbSettings = dbSettings) {
+                is MongoDBSettings ->
+                    MongoDbByRecordAccessLayer(dbSettings.mongoDbConnectionURI, dbSettings.mongoDbConnectionURI, dbSettings.collectionName)
+
+                is MariaDBSettings ->
+                    MariaDbByRecordAccessLayer(
+                        dbHostAndPortPart = dbSettings.mariaDbHost,
+                        dbSchema = dbSettings.mariadbDatabase,
+                        dbUser = dbSettings.mariadbUser,
+                        dbPassword = dbSettings.mariadbPassword,
+                    )
+            }
         runBlocking(context = Dispatchers.Default) {
-            val pathsChannel =
-                when (importOptions.download) {
-                    true -> downloadParallel(cachePathOption.passwordHashesDirectory)
-                    false -> produceAllFilePaths(cachePathOption.passwordHashesDirectory)
-                }
+            val pathsChannel = produceAllFilePaths(cachePathOption.passwordHashesDirectory)
             val fileDataChannel = produceFileData(pathsChannel)
-            val importerJob = importByRecord(mongoDB, fileDataChannel)
+            val importerJob = importByRecord(accessLayer, fileDataChannel)
             RegisterToCancelOnSignalInt.registerChannelForIntSignal(pathsChannel)
             RegisterToCancelOnSignalInt.registerChannelForIntSignal(fileDataChannel)
             RegisterToCancelOnSignalInt.registerJobForIntSignal(importerJob)
@@ -79,12 +92,12 @@ class ImportByHash : CliktCommand() {
     }
 
     private fun CoroutineScope.importByRecord(
-        mongoDB: MongoDatabase,
+        accessLayer: ByRecordAccessLayer,
         fileChannel: ReceiveChannel<FileData>,
     ) = launch {
-        val ibr = ImportByRecord(status = StatusObject, database = mongoDB)
+        val ibr = ByRecordImporter(accessLayer)
         (1..maxRepeatLaunch).map {
-            async {
+            async(Dispatchers.IO) {
                 logger.info {
                     "Starting importByHash process: $it/$maxRepeatLaunch"
                 }

@@ -11,5 +11,34 @@ services:
       # NOTE: MONGODB/USER/PASSWORD should match values in app container
       MONGO_INITDB_ROOT_USERNAME: admin
       MONGO_INITDB_ROOT_PASSWORD: admin1234
+  mariadb:
+    container_name: mariadb
+    image: mariadb:latest
+    restart: unless-stopped
+    command: ["--character-set-server=utf8mb4",
+              "--collation-server=utf8mb4_unicode_ci",
+              "--max-connections=301",
+              "--thread-handling=pool-of-threads",
+              "--innodb-log-file-size=4294967296",
+              "--innodb_buffer_pool_size=34359738368",
+              "--aria_pagecache_buffer_size=4294967296",
+              ]
+    ports:
+      - "3306:3306"
+    volumes:
+      - "./mariadb-init:/docker-entrypoint-initdb.d/"
+      - pwnedMariaDB:/var/lib/mysql
+    environment:
+      # NOTE: MARIADB/USER/PASSWORD should match values in app container
+      MYSQL_ROOT_PASSWORD: admin1234
+      MYSQL_DATABASE: pwned
+      MYSQL_USER: pwned
+      MYSQL_PASSWORD: pwned
+    healthcheck:
+      test: "/usr/bin/mysql --user=root --password=admin1234 --execute \"SHOW DATABASES;\""
+      interval: 2s
+      timeout: 20s
+      retries: 10
 volumes:
   pwnedData:
+  pwnedMariaDB:
