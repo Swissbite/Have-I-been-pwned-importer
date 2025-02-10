@@ -36,7 +36,7 @@ application {
 }
 dependencies {
     val logbackVersion = "1.5.16"
-    val cliktVersion = "5.0.2"
+    val cliktVersion = "5.0.3"
 
     testImplementation(kotlin("test"))
     implementation("org.mongodb:mongodb-driver-kotlin-coroutine:5.3.1")
