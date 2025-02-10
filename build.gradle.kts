@@ -42,7 +42,7 @@ dependencies {
     implementation("org.mongodb:mongodb-driver-kotlin-coroutine:5.3.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.1")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.8.0")
-    implementation("io.github.oshai:kotlin-logging:7.0.3")
+    implementation("io.github.oshai:kotlin-logging:7.0.4")
     implementation("org.mongodb:bson-kotlinx:5.3.1")
     implementation("org.slf4j:slf4j-api:2.0.16")
     implementation("ch.qos.logback:logback-core:$logbackVersion")
