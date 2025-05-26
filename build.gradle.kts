@@ -44,7 +44,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.8.0")
     implementation("io.github.oshai:kotlin-logging:7.0.7")
     implementation("org.mongodb:bson-kotlinx:5.3.1")
-    implementation("org.slf4j:slf4j-api:2.0.16")
+    implementation("org.slf4j:slf4j-api:2.0.17")
     implementation("ch.qos.logback:logback-core:$logbackVersion")
     implementation("ch.qos.logback:logback-classic:$logbackVersion")
     implementation("com.github.ajalt.clikt:clikt:$cliktVersion")
