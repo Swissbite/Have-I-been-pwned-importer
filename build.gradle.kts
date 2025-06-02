@@ -41,7 +41,7 @@ dependencies {
     testImplementation(kotlin("test"))
     implementation("org.mongodb:mongodb-driver-kotlin-coroutine:5.5.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.8.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.8.1")
     implementation("io.github.oshai:kotlin-logging:7.0.7")
     implementation("org.mongodb:bson-kotlinx:5.3.1")
     implementation("org.slf4j:slf4j-api:2.0.17")
