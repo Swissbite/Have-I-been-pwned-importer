@@ -49,7 +49,7 @@ dependencies {
     implementation("ch.qos.logback:logback-classic:$logbackVersion")
     implementation("com.github.ajalt.clikt:clikt:$cliktVersion")
     implementation("com.github.ajalt.clikt:clikt-markdown:$cliktVersion")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:okhttp:5.0.0")
 }
 
 tasks.shadowJar {
