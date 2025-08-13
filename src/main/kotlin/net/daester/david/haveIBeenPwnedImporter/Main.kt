@@ -37,11 +37,12 @@ import kotlin.coroutines.cancellation.CancellationException
 private val logger: KLogger = KotlinLogging.logger { }
 
 fun main(args: Array<String>) =
-    Pwned().subcommands(
-        Download(),
-        ImportByPrefix(),
-        ImportByHash(),
-    ).main(args)
+    Pwned()
+        .subcommands(
+            Download(),
+            ImportByPrefix(),
+            ImportByHash(),
+        ).main(args)
 
 object RegisterToCancelOnSignalInt {
     private val jobsToCancel = MutableStateFlow(emptyList<Job>())

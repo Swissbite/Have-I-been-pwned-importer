@@ -46,7 +46,16 @@ private val logger = KotlinLogging.logger { }
 private fun getAllFilePathsAsFlow(path: Path): Flow<Path> =
     flow {
         logger.info { "Path: ${path.toAbsolutePath()}" }
-        val files = path.toFile().walk().maxDepth(1).asStream().parallel().filter { it.isFile }.map { it.toPath() }.iterator()
+        val files =
+            path
+                .toFile()
+                .walk()
+                .maxDepth(1)
+                .asStream()
+                .parallel()
+                .filter { it.isFile }
+                .map { it.toPath() }
+                .iterator()
         while (files.hasNext()) {
             emit(files.next())
             StatusObject.increaseFilesQueued()
@@ -72,18 +81,22 @@ fun CoroutineScope.produceFileData(fileChannel: ReceiveChannel<Path>): ReceiveCh
                     val hashes =
                         path.bufferedReader().useLines { lineSequence ->
 
-                            lineSequence.map { it.split(":") }.filter { it.size == 2 }.map {
-                                when (val occurrence = it[1].toIntOrNull()) {
-                                    null -> {
-                                        null
-                                    }
+                            lineSequence
+                                .map { it.split(":") }
+                                .filter { it.size == 2 }
+                                .map {
+                                    when (val occurrence = it[1].toIntOrNull()) {
+                                        null -> {
+                                            null
+                                        }
 
-                                    else -> {
-                                        HashWithOccurrence(suffix = it[0], occurrence = occurrence)
-                                            .also { md.update("${it.suffix}:${it.occurrence}".toByteArray()) }
+                                        else -> {
+                                            HashWithOccurrence(suffix = it[0], occurrence = occurrence)
+                                                .also { md.update("${it.suffix}:${it.occurrence}".toByteArray()) }
+                                        }
                                     }
-                                }
-                            }.filterNotNull().toList()
+                                }.filterNotNull()
+                                .toList()
                         }
 
                     val checksum = md.digest().toHexString(HexFormat.UpperCase)
@@ -95,6 +108,13 @@ fun CoroutineScope.produceFileData(fileChannel: ReceiveChannel<Path>): ReceiveCh
         }
     }
 
-data class FileData(val prefix: Prefix, val hashesWithOccurrence: List<HashWithOccurrence>, val checksum: String)
+data class FileData(
+    val prefix: Prefix,
+    val hashesWithOccurrence: List<HashWithOccurrence>,
+    val checksum: String,
+)
 
-data class HashWithOccurrence(val suffix: Suffix, val occurrence: Int)
+data class HashWithOccurrence(
+    val suffix: Suffix,
+    val occurrence: Int,
+)
