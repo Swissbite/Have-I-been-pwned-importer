@@ -88,8 +88,7 @@ class ImportByPrefix(
                     minHashOccurrenceIndex,
                     lastUpdatedIndex,
                 ),
-            )
-            .collect()
+            ).collect()
     }
 
     /**
@@ -140,8 +139,7 @@ class ImportByPrefix(
                 .withDocumentClass<JustPrefixAndChecksum>()
                 .find(
                     eq(PrefixWithHashes.prefixFieldName, dataObject.prefix),
-                )
-                .firstOrNull()
+                ).firstOrNull()
         when (result) {
             null -> {
                 prefixCollection.insertOne(dataObject)
@@ -221,7 +219,10 @@ class ImportByPrefix(
     }
 }
 
-data class JustPrefixAndChecksum(val prefix: Prefix, val checksum: String)
+data class JustPrefixAndChecksum(
+    val prefix: Prefix,
+    val checksum: String,
+)
 
 typealias Prefix = String
 
@@ -247,7 +248,10 @@ data class PrefixWithHashes(
     }
 }
 
-data class HashWithOccurrence(val suffix: Suffix, val occurrence: Int) {
+data class HashWithOccurrence(
+    val suffix: Suffix,
+    val occurrence: Int,
+) {
     companion object {
         val suffixFieldName = HashWithOccurrence::suffix.name
         val occurrenceFieldName = HashWithOccurrence::occurrence.name

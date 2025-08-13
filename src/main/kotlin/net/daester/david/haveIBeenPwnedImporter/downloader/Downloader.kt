@@ -43,33 +43,37 @@ import kotlin.io.path.outputStream
 private val logger: KLogger = KotlinLogging.logger { }
 
 private val defaultClient =
-    OkHttpClient.Builder().retryOnConnectionFailure(true).followRedirects(true).connectionPool(
-        ConnectionPool(maxIdleConnections = 1000, keepAliveDuration = 5, timeUnit = TimeUnit.MINUTES),
-    ).addInterceptor { chain ->
-        val request = chain.request()
-        var response = chain.proceed(request)
-        var retryCounter = 0
-        val retryLimit = 5
-        while (!response.isSuccessful && retryCounter < retryLimit) {
-            response.close()
-            retryCounter = retryCounter.inc()
-            runBlocking {
-                delay(500L * retryCounter)
+    OkHttpClient
+        .Builder()
+        .retryOnConnectionFailure(true)
+        .followRedirects(true)
+        .connectionPool(
+            ConnectionPool(maxIdleConnections = 1000, keepAliveDuration = 5, timeUnit = TimeUnit.MINUTES),
+        ).addInterceptor { chain ->
+            val request = chain.request()
+            var response = chain.proceed(request)
+            var retryCounter = 0
+            val retryLimit = 5
+            while (!response.isSuccessful && retryCounter < retryLimit) {
+                response.close()
+                retryCounter = retryCounter.inc()
+                runBlocking {
+                    delay(500L * retryCounter)
+                }
+                response = chain.proceed(request)
             }
-            response = chain.proceed(request)
-        }
-        response
-    }.addInterceptor {
-        val request = it.request()
-        logger.debug {
-            "Call -> ${request.url.encodedPath}"
-        }
-        val response = it.proceed(request)
-        logger.debug {
-            "Res <-- Status ${response.code}"
-        }
-        response
-    }.build()
+            response
+        }.addInterceptor {
+            val request = it.request()
+            logger.debug {
+                "Call -> ${request.url.encodedPath}"
+            }
+            val response = it.proceed(request)
+            logger.debug {
+                "Res <-- Status ${response.code}"
+            }
+            response
+        }.build()
 
 @OptIn(ExperimentalCoroutinesApi::class)
 fun CoroutineScope.downloadOwnedPasswordRangeFileToPath(
@@ -81,21 +85,25 @@ fun CoroutineScope.downloadOwnedPasswordRangeFileToPath(
         for (prefix in prefixes) {
             val outputPath = path.resolve("$prefix.txt")
 
-            val url = Request.Builder().get().url("https://api.pwnedpasswords.com/range/$prefix").build()
+            val url =
+                Request
+                    .Builder()
+                    .get()
+                    .url("https://api.pwnedpasswords.com/range/$prefix")
+                    .build()
             val call = client.newCall(url)
 
             call.execute().use { response ->
                 if (response.isSuccessful) {
-                    response.body?.byteStream().use { responseInputStream ->
-                        if (responseInputStream != null) {
-                            outputPath.outputStream(
+                    response.body.byteStream().use { responseInputStream ->
+                        outputPath
+                            .outputStream(
                                 StandardOpenOption.CREATE,
                                 StandardOpenOption.TRUNCATE_EXISTING,
                                 StandardOpenOption.WRITE,
                             ).use {
                                 responseInputStream.copyTo(it)
                             }
-                        }
                     }
                 }
                 send(outputPath)

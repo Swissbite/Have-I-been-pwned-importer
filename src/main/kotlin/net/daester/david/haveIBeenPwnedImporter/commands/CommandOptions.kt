@@ -29,14 +29,15 @@ import com.github.ajalt.clikt.parameters.types.path
 import java.nio.file.Path
 
 class CachePathOption : OptionGroup("Generic settings") {
-    val passwordHashesDirectory: Path by option("--password-hashes-directory", "--cache-dir", "--dir").path(
-        mustExist = true,
-        canBeFile = false,
-        canBeDir = true,
-        mustBeWritable = true,
-        mustBeReadable = true,
-    )
-        .help("Existing writable and readable directory to cache password hashes").required()
+    val passwordHashesDirectory: Path by option("--password-hashes-directory", "--cache-dir", "--dir")
+        .path(
+            mustExist = true,
+            canBeFile = false,
+            canBeDir = true,
+            mustBeWritable = true,
+            mustBeReadable = true,
+        ).help("Existing writable and readable directory to cache password hashes")
+        .required()
 }
 
 class DBImportOption : OptionGroup("DB Import settings") {
