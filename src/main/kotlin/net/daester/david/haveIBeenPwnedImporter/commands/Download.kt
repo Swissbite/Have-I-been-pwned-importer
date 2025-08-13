@@ -67,16 +67,17 @@ class Download : CliktCommand() {
             val downloadJob =
                 launch {
                     logger.info { "Start downloads" }
-                    (0..maxRepeatLaunch).map {
-                        val downloads =
-                            downloadOwnedPasswordRangeFileToPath(cachePathOption.passwordHashesDirectory, prefixes)
-                        RegisterToCancelOnSignalInt.registerChannelForIntSignal(downloads)
-                        async {
-                            for (path in downloads) {
-                                downloaded.update { it.inc() }
+                    (0..maxRepeatLaunch)
+                        .map {
+                            val downloads =
+                                downloadOwnedPasswordRangeFileToPath(cachePathOption.passwordHashesDirectory, prefixes)
+                            RegisterToCancelOnSignalInt.registerChannelForIntSignal(downloads)
+                            async {
+                                for (path in downloads) {
+                                    downloaded.update { it.inc() }
+                                }
                             }
-                        }
-                    }.awaitAll()
+                        }.awaitAll()
                 }
 
             RegisterToCancelOnSignalInt.registerChannelForIntSignal(prefixes)

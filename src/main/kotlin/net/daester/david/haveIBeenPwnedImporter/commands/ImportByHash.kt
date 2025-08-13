@@ -83,13 +83,14 @@ class ImportByHash : CliktCommand() {
         fileChannel: ReceiveChannel<FileData>,
     ) = launch {
         val ibr = ImportByRecord(status = StatusObject, database = mongoDB)
-        (1..maxRepeatLaunch).map {
-            async {
-                logger.info {
-                    "Starting importByHash process: $it/$maxRepeatLaunch"
+        (1..maxRepeatLaunch)
+            .map {
+                async {
+                    logger.info {
+                        "Starting importByHash process: $it/$maxRepeatLaunch"
+                    }
+                    ibr.processHashFiles(fileChannel)
                 }
-                ibr.processHashFiles(fileChannel)
-            }
-        }.awaitAll()
+            }.awaitAll()
     }
 }

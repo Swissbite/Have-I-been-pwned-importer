@@ -100,12 +100,13 @@ class ImportByRecord(
                 val deleted =
                     async(Dispatchers.IO) {
                         logger.trace { "Deleting entries for ${fileData.prefix} with checksum not equal ${fileData.checksum}" }
-                        hashCollection.deleteMany(
-                            and(
-                                eq(HashWithOccurrence.prefixFieldName, fileData.prefix),
-                                ne(HashWithOccurrence.fileRecordChecksumFieldName, fileData.checksum),
-                            ),
-                        ).deletedCount
+                        hashCollection
+                            .deleteMany(
+                                and(
+                                    eq(HashWithOccurrence.prefixFieldName, fileData.prefix),
+                                    ne(HashWithOccurrence.fileRecordChecksumFieldName, fileData.checksum),
+                                ),
+                            ).deletedCount
                     }
 
                 if (fileData.hashesWithOccurrence.size.toLong() == entriesCount.await()) {
@@ -126,12 +127,13 @@ class ImportByRecord(
                             }
                         }
                     val deletedExisting =
-                        hashCollection.deleteMany(
-                            eq(
-                                HashWithOccurrence.prefixFieldName,
-                                fileData.prefix,
-                            ),
-                        ).deletedCount
+                        hashCollection
+                            .deleteMany(
+                                eq(
+                                    HashWithOccurrence.prefixFieldName,
+                                    fileData.prefix,
+                                ),
+                            ).deletedCount
 
                     status.increaseTotalHashes(prepareBulkInsert.await().size)
                     hashCollection.insertMany(prepareBulkInsert.await(), insertManyOptions).wasAcknowledged()
