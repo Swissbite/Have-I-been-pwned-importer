@@ -35,7 +35,7 @@ application {
     mainClass = "net.daester.david.haveIBeenPwnedImporter.MainKt"
 }
 dependencies {
-    val logbackVersion = "1.5.18"
+    val logbackVersion = "1.5.19"
     val cliktVersion = "5.0.3"
 
     testImplementation(kotlin("test"))
