@@ -18,11 +18,11 @@
  */
 
 plugins {
-    kotlin("jvm") version "2.2.10"
+    kotlin("jvm") version "2.4.21"
     application
-    id("com.gradleup.shadow") version "9.2.2"
-    id("org.jlleitschuh.gradle.ktlint") version "13.1.0"
-    id("com.github.ben-manes.versions") version "0.52.0"
+    id("com.gradleup.shadow") version "9.6.1"
+    id("org.jlleitschuh.gradle.ktlint") version "14.2.0"
+    id("io.github.ben-manes.versions") version "0.67.0"
 }
 
 group = "org.example"
@@ -35,28 +35,31 @@ application {
     mainClass = "net.daester.david.haveIBeenPwnedImporter.MainKt"
 }
 dependencies {
-    val logbackVersion = "1.5.18"
-    val cliktVersion = "5.0.3"
+    val logbackVersion = "1.6.6"
+    val cliktVersion = "5.1.0"
 
     testImplementation(kotlin("test"))
-    implementation("org.mongodb:mongodb-driver-kotlin-coroutine:5.6.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.9.0")
-    implementation("io.github.oshai:kotlin-logging:7.0.13")
-    implementation("org.mongodb:bson-kotlinx:5.6.0")
-    implementation("org.slf4j:slf4j-api:2.0.17")
+    implementation("org.mongodb:mongodb-driver-kotlin-coroutine:5.14.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.12.0")
+    implementation("io.github.oshai:kotlin-logging:8.0.6")
+    implementation("org.mongodb:bson-kotlinx:5.14.0")
+    implementation("org.slf4j:slf4j-api:2.0.20")
     implementation("ch.qos.logback:logback-core:$logbackVersion")
     implementation("ch.qos.logback:logback-classic:$logbackVersion")
     implementation("com.github.ajalt.clikt:clikt:$cliktVersion")
     implementation("com.github.ajalt.clikt:clikt-markdown:$cliktVersion")
-    implementation("com.squareup.okhttp3:okhttp:5.1.0")
+    implementation("com.squareup.okhttp3:okhttp:5.5.1")
 }
 
 tasks.shadowJar {
     archiveFileName.set("pwned.jar")
     archiveBaseName.set("pwned")
 
-    minimize()
+    minimize {
+        // Needed at runtime by the MongoDB Kotlin driver (reflection-based codecs)
+        exclude(dependency("org.jetbrains.kotlin:kotlin-reflect:.*"))
+    }
 }
 tasks.startScripts {
     applicationName = "pwned"
