@@ -44,6 +44,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.12.0")
     implementation("io.github.oshai:kotlin-logging:8.0.6")
     implementation("org.mongodb:bson-kotlinx:5.14.0")
+    // Used by the MongoDB driver's codecs at runtime; declared to keep it in line with the Kotlin version
+    implementation(kotlin("reflect"))
     implementation("org.slf4j:slf4j-api:2.0.20")
     implementation("ch.qos.logback:logback-core:$logbackVersion")
     implementation("ch.qos.logback:logback-classic:$logbackVersion")
@@ -59,6 +61,8 @@ tasks.shadowJar {
     minimize {
         // Needed at runtime by the MongoDB Kotlin driver (reflection-based codecs)
         exclude(dependency("org.jetbrains.kotlin:kotlin-reflect:.*"))
+        // SLF4J loads the Logback provider via ServiceLoader; without this, logging falls back to NOP
+        exclude(dependency("ch.qos.logback:logback-classic:.*"))
     }
 }
 tasks.startScripts {
