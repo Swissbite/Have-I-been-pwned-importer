@@ -1,7 +1,7 @@
 services:
   mdb:
     container_name: mongodb
-    image: mongo:latest
+    image: mongo:9.0
     restart: unless-stopped
     ports:
       - "27017:27017"
